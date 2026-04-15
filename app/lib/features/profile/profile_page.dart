@@ -19,7 +19,7 @@ class ProfilePage extends StatelessWidget {
   final VoidCallback onOpenReview;
   final VoidCallback onOpenSuccess;
   final VoidCallback onOpenSettings;
-  final VoidCallback onSignOut;
+  final Future<void> Function() onSignOut;
 
   @override
   Widget build(BuildContext context) {
@@ -50,7 +50,11 @@ class ProfilePage extends StatelessWidget {
               color: AppColors.surface,
               borderRadius: BorderRadius.circular(28),
               boxShadow: const [
-                BoxShadow(color: Color(0x10000000), blurRadius: 24, offset: Offset(0, 10)),
+                BoxShadow(
+                  color: Color(0x10000000),
+                  blurRadius: 24,
+                  offset: Offset(0, 10),
+                ),
               ],
             ),
             child: Row(
@@ -73,7 +77,10 @@ class ProfilePage extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Julian Thorne', style: Theme.of(context).textTheme.headlineSmall),
+                      Text(
+                        'Julian Thorne',
+                        style: Theme.of(context).textTheme.headlineSmall,
+                      ),
                       const SizedBox(height: 6),
                       Text(
                         'Collector, seller, and weekend curator',
@@ -104,10 +111,26 @@ class ProfilePage extends StatelessWidget {
           const SizedBox(height: 14),
           _StatsPanel(
             metrics: const [
-              _MetricItem(label: 'I\'ve posted', value: '12', icon: Icons.edit_rounded),
-              _MetricItem(label: 'I\'ve sold', value: '8', icon: Icons.sell_rounded),
-              _MetricItem(label: 'I\'ve bought', value: '15', icon: Icons.shopping_bag_rounded),
-              _MetricItem(label: 'I\'ve liked', value: '24', icon: Icons.favorite_rounded),
+              _MetricItem(
+                label: 'I\'ve posted',
+                value: '12',
+                icon: Icons.edit_rounded,
+              ),
+              _MetricItem(
+                label: 'I\'ve sold',
+                value: '8',
+                icon: Icons.sell_rounded,
+              ),
+              _MetricItem(
+                label: 'I\'ve bought',
+                value: '15',
+                icon: Icons.shopping_bag_rounded,
+              ),
+              _MetricItem(
+                label: 'I\'ve liked',
+                value: '24',
+                icon: Icons.favorite_rounded,
+              ),
             ],
           ),
           const SizedBox(height: 16),
@@ -146,10 +169,7 @@ class ProfilePage extends StatelessWidget {
                 ];
 
                 final listing = listings[index];
-                return SizedBox(
-                  width: 220,
-                  child: _ListingCard(item: listing),
-                );
+                return SizedBox(width: 220, child: _ListingCard(item: listing));
               },
             ),
           ),
@@ -160,7 +180,11 @@ class ProfilePage extends StatelessWidget {
               color: AppColors.accent,
               borderRadius: BorderRadius.circular(24),
               boxShadow: const [
-                BoxShadow(color: Color(0x18FFD83D), blurRadius: 18, offset: Offset(0, 8)),
+                BoxShadow(
+                  color: Color(0x18FFD83D),
+                  blurRadius: 18,
+                  offset: Offset(0, 8),
+                ),
               ],
             ),
             child: Row(
@@ -169,11 +193,18 @@ class ProfilePage extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('VIP membership', style: Theme.of(context).textTheme.titleLarge?.copyWith(color: AppColors.primary)),
+                      Text(
+                        'VIP membership',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          color: AppColors.primary,
+                        ),
+                      ),
                       const SizedBox(height: 6),
                       Text(
                         'Unlock exclusive seller benefits',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.primary.withOpacity(0.82)),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppColors.primary.withOpacity(0.82),
+                        ),
                       ),
                       const SizedBox(height: 12),
                       TextButton(
@@ -211,11 +242,23 @@ class ProfilePage extends StatelessWidget {
             tiles: const [
               _ServiceTile(icon: Icons.waves_rounded, label: 'Fish pond'),
               _ServiceTile(icon: Icons.autorenew_rounded, label: 'Old for new'),
-              _ServiceTile(icon: Icons.admin_panel_settings_rounded, label: 'Safety center'),
+              _ServiceTile(
+                icon: Icons.admin_panel_settings_rounded,
+                label: 'Safety center',
+              ),
               _ServiceTile(icon: Icons.support_agent_rounded, label: 'Support'),
-              _ServiceTile(icon: Icons.rate_review_rounded, label: 'My reviews'),
-              _ServiceTile(icon: Icons.group_add_rounded, label: 'Invite friends'),
-              _ServiceTile(icon: Icons.local_activity_rounded, label: 'Vouchers'),
+              _ServiceTile(
+                icon: Icons.rate_review_rounded,
+                label: 'My reviews',
+              ),
+              _ServiceTile(
+                icon: Icons.group_add_rounded,
+                label: 'Invite friends',
+              ),
+              _ServiceTile(
+                icon: Icons.local_activity_rounded,
+                label: 'Vouchers',
+              ),
               _ServiceTile(icon: Icons.location_on_rounded, label: 'Address'),
             ],
           ),
@@ -248,7 +291,9 @@ class ProfilePage extends StatelessWidget {
             title: 'Sign out',
             subtitle: 'Return to the authentication screen',
             icon: Icons.logout_rounded,
-            onTap: onSignOut,
+            onTap: () async {
+              await onSignOut();
+            },
           ),
         ],
       ),
@@ -291,7 +336,11 @@ class _StatsPanel extends StatelessWidget {
             color: AppColors.surface,
             borderRadius: BorderRadius.circular(24),
             boxShadow: const [
-              BoxShadow(color: Color(0x10000000), blurRadius: 24, offset: Offset(0, 10)),
+              BoxShadow(
+                color: Color(0x10000000),
+                blurRadius: 24,
+                offset: Offset(0, 10),
+              ),
             ],
           ),
           child: GridView.count(
@@ -315,9 +364,16 @@ class _StatsPanel extends StatelessWidget {
                         child: Icon(metric.icon, color: AppColors.textMuted),
                       ),
                       const SizedBox(height: 8),
-                      Text(metric.label, textAlign: TextAlign.center, style: Theme.of(context).textTheme.labelSmall),
+                      Text(
+                        metric.label,
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.labelSmall,
+                      ),
                       const SizedBox(height: 4),
-                      Text(metric.value, style: Theme.of(context).textTheme.titleSmall),
+                      Text(
+                        metric.value,
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
                     ],
                   ),
                 )
@@ -330,7 +386,11 @@ class _StatsPanel extends StatelessWidget {
 }
 
 class _MetricItem {
-  const _MetricItem({required this.label, required this.value, required this.icon});
+  const _MetricItem({
+    required this.label,
+    required this.value,
+    required this.icon,
+  });
 
   final String label;
   final String value;
@@ -338,7 +398,12 @@ class _MetricItem {
 }
 
 class _ListingItem {
-  const _ListingItem({required this.title, required this.price, required this.status, required this.accentColor});
+  const _ListingItem({
+    required this.title,
+    required this.price,
+    required this.status,
+    required this.accentColor,
+  });
 
   final String title;
   final String price;
@@ -359,7 +424,11 @@ class _ListingCard extends StatelessWidget {
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(24),
         boxShadow: const [
-          BoxShadow(color: Color(0x10000000), blurRadius: 22, offset: Offset(0, 10)),
+          BoxShadow(
+            color: Color(0x10000000),
+            blurRadius: 22,
+            offset: Offset(0, 10),
+          ),
         ],
       ),
       child: Column(
@@ -380,14 +449,19 @@ class _ListingCard extends StatelessWidget {
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  height: 1.3,
-                ),
+              fontWeight: FontWeight.w700,
+              height: 1.3,
+            ),
           ),
           const SizedBox(height: 8),
           Row(
             children: [
-              Text(item.price, style: Theme.of(context).textTheme.titleLarge?.copyWith(color: AppColors.coral)),
+              Text(
+                item.price,
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(color: AppColors.coral),
+              ),
               const Spacer(),
               Text(item.status, style: Theme.of(context).textTheme.labelSmall),
             ],
@@ -415,7 +489,11 @@ class _ServicesPanel extends StatelessWidget {
             color: AppColors.surface,
             borderRadius: BorderRadius.circular(24),
             boxShadow: const [
-              BoxShadow(color: Color(0x10000000), blurRadius: 24, offset: Offset(0, 10)),
+              BoxShadow(
+                color: Color(0x10000000),
+                blurRadius: 24,
+                offset: Offset(0, 10),
+              ),
             ],
           ),
           child: GridView.count(
@@ -453,7 +531,11 @@ class _ServiceTile extends StatelessWidget {
           child: Icon(icon, color: AppColors.primary),
         ),
         const SizedBox(height: 8),
-        Text(label, textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodySmall),
+        Text(
+          label,
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
       ],
     );
   }

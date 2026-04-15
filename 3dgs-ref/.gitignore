@@ -1,0 +1,40 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.iml
+
+# Python
+backend/.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Env files
+.env
+.env.*
+!.env.example
+
+# Flutter / Dart local build output
+mobile_app/.dart_tool/
+mobile_app/build/
+mobile_app/android/build/
+mobile_app/.flutter-plugins-dependencies
+
+# Runtime / training artifacts
+outputs/
+storage/tasks/*
+storage/uploads/*
+storage/processed/*
+storage/models/*
+
+# Keep storage layout in Git
+!storage/.gitkeep
+!storage/tasks/.gitkeep
+!storage/uploads/.gitkeep
+!storage/processed/.gitkeep
+!storage/models/.gitkeep
