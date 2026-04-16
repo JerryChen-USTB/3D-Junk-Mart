@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 
 class ApiClient {
   ApiClient({http.Client? httpClient, String? baseUrl})
@@ -118,6 +119,46 @@ class ApiClient {
       _uri(path),
       headers: _headers(bearerToken),
     );
+    return _decodeEnvelope<Map<String, dynamic>>(
+      response,
+      (value) => value is Map<String, dynamic> ? value : <String, dynamic>{},
+    );
+  }
+
+  /// Upload a file via multipart POST and return the decoded envelope.
+  Future<ApiEnvelope<Map<String, dynamic>>> uploadFile(
+    String path, {
+    required String filePath,
+    required String fieldName,
+    String? bearerToken,
+  }) async {
+    final uri = _uri(path);
+    final request = http.MultipartRequest('POST', uri);
+    if (bearerToken != null && bearerToken.isNotEmpty) {
+      request.headers['Authorization'] = 'Bearer $bearerToken';
+    }
+    request.headers['Accept'] = 'application/json';
+
+    // Determine MIME type from file extension.
+    final lower = filePath.toLowerCase();
+    MediaType contentType;
+    if (lower.endsWith('.png')) {
+      contentType = MediaType('image', 'png');
+    } else if (lower.endsWith('.webp')) {
+      contentType = MediaType('image', 'webp');
+    } else if (lower.endsWith('.gif')) {
+      contentType = MediaType('image', 'gif');
+    } else {
+      contentType = MediaType('image', 'jpeg');
+    }
+
+    request.files.add(await http.MultipartFile.fromPath(
+      fieldName,
+      filePath,
+      contentType: contentType,
+    ));
+    final streamed = await _httpClient.send(request);
+    final response = await http.Response.fromStream(streamed);
     return _decodeEnvelope<Map<String, dynamic>>(
       response,
       (value) => value is Map<String, dynamic> ? value : <String, dynamic>{},

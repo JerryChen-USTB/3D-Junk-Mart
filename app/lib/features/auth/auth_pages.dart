@@ -128,14 +128,14 @@ class _AuthLoginPageState extends State<AuthLoginPage> {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        'Secure access for buyers and sellers',
+                        '买家和卖家的安全登录',
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ],
                   ),
                 ),
                 EditorialPill(
-                  label: 'Auth',
+                  label: '登录',
                   backgroundColor: AppColors.accent,
                   foregroundColor: AppColors.primary,
                 ),
@@ -143,21 +143,21 @@ class _AuthLoginPageState extends State<AuthLoginPage> {
             ),
             const SizedBox(height: 18),
             EditorialImagePlaceholder(
-              label: 'Junk Mart access',
-              subtitle: 'Sign in to continue your demo journey.',
-              badge: 'Secure login',
+              label: 'Junk Mart',
+              subtitle: '登录后管理你的商品和订单。',
+              badge: '安全登录',
               height: 204,
               borderRadius: 30,
               accentColor: AppColors.accent,
             ),
             const SizedBox(height: 16),
             Text(
-              'Welcome back',
+              '欢迎回来',
               style: Theme.of(context).textTheme.displaySmall,
             ),
             const SizedBox(height: 8),
             Text(
-              'Use the phone or email address you registered with. Sign in to manage orders, chats, and listings.',
+              '使用注册时的手机号或邮箱登录，管理订单、消息和商品。',
               style: Theme.of(
                 context,
               ).textTheme.bodyMedium?.copyWith(height: 1.45),
@@ -169,15 +169,15 @@ class _AuthLoginPageState extends State<AuthLoginPage> {
             const SizedBox(height: 18),
             _AuthInputField(
               controller: _identifierController,
-              label: 'Phone or email',
-              hintText: 'you@example.com or 138 0000 0000',
+              label: '手机号或邮箱',
+              hintText: 'you@example.com 或 138 0000 0000',
               icon: Icons.person_outline_rounded,
             ),
             const SizedBox(height: 12),
             _AuthInputField(
               controller: _passwordController,
-              label: 'Password',
-              hintText: 'Enter your password',
+              label: '密码',
+              hintText: '输入密码',
               icon: Icons.lock_outline_rounded,
               obscureText: true,
             ),
@@ -192,9 +192,9 @@ class _AuthLoginPageState extends State<AuthLoginPage> {
                         _rememberDevice = value ?? false;
                       });
                     },
-              title: const Text('Remember this device'),
+              title: const Text('记住本设备'),
               subtitle: Text(
-                'Keeps the demo session active until you sign out.',
+                '保持登录状态，直到手动退出。',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
               controlAffinity: ListTileControlAffinity.leading,
@@ -203,29 +203,29 @@ class _AuthLoginPageState extends State<AuthLoginPage> {
             const SizedBox(height: 4),
             FilledButton(
               onPressed: _submitting ? null : _submit,
-              child: Text(_submitting ? 'Signing in...' : 'Sign in'),
+              child: Text(_submitting ? '登录中...' : '登录'),
             ),
             const SizedBox(height: 10),
             OutlinedButton(
               onPressed: _submitting ? null : _continueAsGuest,
-              child: Text(_submitting ? 'Please wait...' : 'Continue as guest'),
+              child: Text(_submitting ? '请稍候...' : '游客模式'),
             ),
             const SizedBox(height: 14),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Text('New here?', style: Theme.of(context).textTheme.bodySmall),
+                Text('还没有账号？', style: Theme.of(context).textTheme.bodySmall),
                 TextButton(
                   onPressed: _submitting ? null : widget.onSwitchToRegister,
-                  child: const Text('Create account'),
+                  child: const Text('创建账号'),
                 ),
               ],
             ),
             const SizedBox(height: 8),
             const _AuthInfoCard(
-              title: 'What happens after sign in',
+              title: '登录后可以做什么',
               body:
-                  'Your profile, messages, orders, and sell drafts all use the same user identity.',
+                  '你的个人资料、消息、订单和发布草稿都会关联到同一个账号。',
               icon: Icons.shield_outlined,
             ),
           ],
@@ -277,7 +277,7 @@ class _AuthRegisterPageState extends State<AuthRegisterPage> {
     if (_passwordController.text != _confirmPasswordController.text) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Passwords do not match.')));
+      ).showSnackBar(const SnackBar(content: Text('两次输入的密码不一致')));
       return;
     }
 
@@ -323,19 +323,19 @@ class _AuthRegisterPageState extends State<AuthRegisterPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Create your account',
+                        '创建账号',
                         style: Theme.of(context).textTheme.titleLarge,
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        'Join to post items, track orders, and message sellers.',
+                        '加入后可以发布商品、查看订单、与卖家沟通。',
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ],
                   ),
                 ),
                 EditorialPill(
-                  label: 'Join',
+                  label: '注册',
                   backgroundColor: AppColors.surfaceSoft,
                   foregroundColor: AppColors.text,
                 ),
@@ -343,21 +343,21 @@ class _AuthRegisterPageState extends State<AuthRegisterPage> {
             ),
             const SizedBox(height: 18),
             EditorialImagePlaceholder(
-              label: 'Open a new account',
-              subtitle: 'Your profile and listings are created together.',
-              badge: 'Register',
+              label: '创建新账号',
+              subtitle: '个人资料和商品将同时创建。',
+              badge: '注册',
               height: 204,
               borderRadius: 30,
               accentColor: AppColors.surfaceRaised,
             ),
             const SizedBox(height: 16),
             Text(
-              'Build your profile',
+              '完善个人信息',
               style: Theme.of(context).textTheme.displaySmall,
             ),
             const SizedBox(height: 8),
             Text(
-              'Create a seller-ready profile once. The backend should issue the user record, profile snapshot, and login session together.',
+              '创建账号后即可开始发布商品和浏览 3D 二手市场。',
               style: Theme.of(
                 context,
               ).textTheme.bodyMedium?.copyWith(height: 1.45),
@@ -369,30 +369,30 @@ class _AuthRegisterPageState extends State<AuthRegisterPage> {
             const SizedBox(height: 18),
             _AuthInputField(
               controller: _displayNameController,
-              label: 'Display name',
-              hintText: 'How your name appears in the app',
+              label: '显示名称',
+              hintText: '其他用户看到的名字',
               icon: Icons.badge_outlined,
             ),
             const SizedBox(height: 12),
             _AuthInputField(
               controller: _identifierController,
-              label: 'Phone or email',
-              hintText: 'Primary sign-in identifier',
+              label: '手机号或邮箱',
+              hintText: '用于登录的账号',
               icon: Icons.alternate_email_rounded,
             ),
             const SizedBox(height: 12),
             _AuthInputField(
               controller: _passwordController,
-              label: 'Password',
-              hintText: 'Create a password',
+              label: '密码',
+              hintText: '设置密码',
               icon: Icons.lock_outline_rounded,
               obscureText: true,
             ),
             const SizedBox(height: 12),
             _AuthInputField(
               controller: _confirmPasswordController,
-              label: 'Confirm password',
-              hintText: 'Repeat your password',
+              label: '确认密码',
+              hintText: '再次输入密码',
               icon: Icons.lock_reset_outlined,
               obscureText: true,
             ),
@@ -407,9 +407,9 @@ class _AuthRegisterPageState extends State<AuthRegisterPage> {
                         _acceptedTerms = value ?? false;
                       });
                     },
-              title: const Text('I agree to the terms and privacy policy'),
+              title: const Text('我同意服务条款和隐私政策'),
               subtitle: Text(
-                'The consent record is stored alongside the account.',
+                '你的同意记录将与账号一起保存。',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
               controlAffinity: ListTileControlAffinity.leading,
@@ -419,19 +419,19 @@ class _AuthRegisterPageState extends State<AuthRegisterPage> {
             FilledButton(
               onPressed: (_submitting || !_acceptedTerms) ? null : _submit,
               child: Text(
-                _submitting ? 'Creating account...' : 'Create account',
+                _submitting ? '创建中...' : '创建账号',
               ),
             ),
             const SizedBox(height: 10),
             OutlinedButton(
               onPressed: _submitting ? null : widget.onSwitchToLogin,
-              child: const Text('Back to sign in'),
+              child: const Text('返回登录'),
             ),
             const SizedBox(height: 14),
             const _AuthInfoCard(
-              title: 'Database closure',
+              title: '账号安全',
               body:
-                  'Registration should create the user row, profile row, consent row, and session row in one logical flow.',
+                  '注册时会同时创建你的用户资料和个人主页，确保信息安全。',
               icon: Icons.data_object_rounded,
             ),
           ],

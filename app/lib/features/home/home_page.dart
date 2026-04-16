@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../../core/listings/listing_models.dart';
 import '../../core/listings/listings_repository.dart';
 import '../../theme/app_colors.dart';
-import '../../widgets/editorial_widgets.dart';
 import '../listings/listing_card.dart';
 
 class HomePage extends StatefulWidget {
@@ -12,19 +11,11 @@ class HomePage extends StatefulWidget {
     required this.repository,
     required this.onGoSearch,
     required this.onOpenListing,
-    required this.onOpenOrder,
-    required this.onOpenChat,
-    required this.onOpenReview,
-    required this.onOpenSuccess,
   });
 
   final ListingsRepository repository;
   final VoidCallback onGoSearch;
   final ValueChanged<String> onOpenListing;
-  final VoidCallback onOpenOrder;
-  final VoidCallback onOpenChat;
-  final VoidCallback onOpenReview;
-  final VoidCallback onOpenSuccess;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -64,16 +55,15 @@ class _HomePageState extends State<HomePage> {
                 _HomeHeader(onGoSearch: widget.onGoSearch),
                 const SizedBox(height: 16),
                 const ListingHeroBanner(
-                  title: '3D resale\nmarketplace',
+                  title: '3D 二手商城',
                   subtitle:
-                      'Browse second-hand goods that can grow into richer 3D product experiences.',
+                      '浏览二手好物，支持 3D 展示，所见即所得。',
                   badge: 'Junk Mart',
                 ),
                 const SizedBox(height: 18),
-                EditorialSectionHeader(
-                  title: 'Recommended listings',
-                  actionLabel: '${listings.length} items',
-                  onActionTap: widget.onGoSearch,
+                Text(
+                  '推荐商品',
+                  style: Theme.of(context).textTheme.headlineSmall,
                 ),
                 const SizedBox(height: 12),
                 if (snapshot.connectionState == ConnectionState.waiting &&
@@ -84,41 +74,44 @@ class _HomePageState extends State<HomePage> {
                   )
                 else if (snapshot.hasError && listings.isEmpty)
                   _ErrorPanel(onRetry: _refresh)
+                else if (listings.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 48),
+                    child: Column(
+                      children: [
+                        Container(
+                          width: 80,
+                          height: 80,
+                          decoration: BoxDecoration(
+                            color: AppColors.surface,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.storefront_rounded,
+                            size: 36,
+                            color: AppColors.textMuted,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          '还没有商品',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '去“发布”页创建你的第一个 3D 商品吧',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: AppColors.textMuted,
+                              ),
+                        ),
+                      ],
+                    ),
+                  )
                 else
                   _ListingGrid(
                     listings: listings,
                     onOpenListing: widget.onOpenListing,
                   ),
-                const SizedBox(height: 20),
-                EditorialSectionHeader(
-                  title: 'Quick actions',
-                  actionLabel: 'Demo',
-                ),
-                const SizedBox(height: 12),
-                EditorialActionCard(
-                  title: 'Order detail',
-                  subtitle: 'Review shipping, payment, and receipt confirmation flows',
-                  icon: Icons.local_shipping_rounded,
-                  onTap: widget.onOpenOrder,
-                ),
-                EditorialActionCard(
-                  title: 'Chat thread',
-                  subtitle: 'Continue the buyer and seller conversation',
-                  icon: Icons.chat_bubble_outline_rounded,
-                  onTap: widget.onOpenChat,
-                ),
-                EditorialActionCard(
-                  title: 'Review flow',
-                  subtitle: 'Open the rating, tag, and text review experience',
-                  icon: Icons.rate_review_rounded,
-                  onTap: widget.onOpenReview,
-                ),
-                EditorialActionCard(
-                  title: 'Payment success',
-                  subtitle: 'Preview the completion state after checkout',
-                  icon: Icons.verified_rounded,
-                  onTap: widget.onOpenSuccess,
-                ),
               ],
             );
           },
@@ -159,7 +152,7 @@ class _HomeHeader extends StatelessWidget {
                   SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Search 3D-ready listings',
+                      '搜索 3D 商品',
                       style: TextStyle(
                         color: AppColors.textMuted,
                         fontSize: 13,

@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File, status
 
 from backend.app.http import ok
 from backend.app.schemas import (
@@ -695,7 +695,38 @@ def users_me(request: Request, store: MarketplaceStore = Depends(get_store)) -> 
 def users_me_patch(request: Request, payload: UserProfileUpdate, store: MarketplaceStore = Depends(get_store)) -> dict[str, Any]:
     user = _require_current_user(store, request)
     profile = store.update_user_profile(user["entity_id"], payload.model_dump(exclude_none=True))
-    return ok(request, profile["payload"])
+    return ok(request, _profile_detail(store, store.user_record(user["entity_id"])))
+
+
+@router.post("/users/me/avatar")
+async def users_me_avatar_upload(request: Request, file: UploadFile = File(...), store: MarketplaceStore = Depends(get_store)) -> dict[str, Any]:
+    user = _require_current_user(store, request)
+    user_id = user["entity_id"]
+
+    # Validate content type.
+    content_type = file.content_type or ""
+    if not content_type.startswith("image/"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only image files are allowed.")
+
+    # Determine extension from content type.
+    ext_map = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/gif": ".gif"}
+    ext = ext_map.get(content_type, ".jpg")
+
+    # Save file to storage/avatars/{user_id}{ext}.
+    from shared.config import STORAGE_ROOT
+    avatar_dir = STORAGE_ROOT / "avatars"
+    avatar_dir.mkdir(parents=True, exist_ok=True)
+    avatar_path = avatar_dir / f"{user_id}{ext}"
+    content = await file.read()
+    avatar_path.write_bytes(content)
+
+    # Build the URL path.
+    avatar_url = f"/storage/avatars/{user_id}{ext}"
+
+    # Update user profile with the new avatar_url.
+    store.update_user_profile(user_id, {"avatar_url": avatar_url})
+
+    return ok(request, _profile_detail(store, store.user_record(user_id)))
 
 
 @router.get("/users/me/stats")

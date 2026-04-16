@@ -9,9 +9,9 @@ import '../chat/chat_pages.dart';
 import '../home/home_page.dart';
 import '../listings/listing_detail_page.dart';
 import '../profile/profile_page.dart';
+import '../profile/profile_settings_page.dart';
 import '../search/search_page.dart';
 import '../sell/sell_page.dart';
-import '../../navigation/demo_page_builders.dart';
 import '../../theme/app_colors.dart';
 
 class AppShell extends StatefulWidget {
@@ -47,8 +47,13 @@ class _AppShellState extends State<AppShell> {
     });
   }
 
-  void _openPage(DemoPageBuilder pageBuilder) {
-    Navigator.of(context).push(MaterialPageRoute<void>(builder: pageBuilder));
+  void _showComingSoon() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('功能开发中，敬请期待'),
+        duration: Duration(seconds: 2),
+      ),
+    );
   }
 
   void _openListingDetail(String listingId) {
@@ -57,9 +62,9 @@ class _AppShellState extends State<AppShell> {
         builder: (_) => ListingDetailPage(
           repository: _listingsRepository,
           listingId: listingId,
-          onOpenChat: () => _openPage(buildChatDetailDemoPage),
-          onOpenOrder: () => _openPage(buildOrderDetailDemoPage),
-          onOpenReview: () => _openPage(buildReviewDemoPage),
+          onOpenChat: _showComingSoon,
+          onOpenOrder: _showComingSoon,
+          onOpenReview: _showComingSoon,
         ),
       ),
     );
@@ -79,10 +84,6 @@ class _AppShellState extends State<AppShell> {
         repository: _listingsRepository,
         onGoSearch: () => _selectTab(1),
         onOpenListing: _openListingDetail,
-        onOpenOrder: () => _openPage(buildOrderDetailDemoPage),
-        onOpenChat: () => _openPage(buildChatDetailDemoPage),
-        onOpenReview: () => _openPage(buildReviewDemoPage),
-        onOpenSuccess: () => _openPage(buildPaymentSuccessDemoPage),
       ),
       SearchPage(
         key: ValueKey('search-$_marketplaceVersion'),
@@ -97,14 +98,24 @@ class _AppShellState extends State<AppShell> {
         onOpenListing: _openListingDetail,
         onMarketplaceChanged: _markMarketplaceDirty,
       ),
-      MessagesPage(onOpenChat: () => _openPage(buildChatDetailDemoPage)),
+      const MessagesPage(),
       ProfilePage(
         key: ValueKey('profile-$_marketplaceVersion'),
         session: widget.session,
-        onOpenOrder: () => _openPage(buildOrderDetailDemoPage),
-        onOpenReview: () => _openPage(buildReviewDemoPage),
-        onOpenSuccess: () => _openPage(buildPaymentSuccessDemoPage),
-        onOpenSettings: () => _openPage(buildProfileSettingsDemoPage),
+        apiClient: widget.apiClient,
+        onOpenSettings: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => ProfileSettingsPage(
+              session: widget.session,
+              apiClient: widget.apiClient,
+              accessToken: widget.session.accessToken,
+              onSave: () {
+                Navigator.of(context).pop();
+                _markMarketplaceDirty();
+              },
+            ),
+          ),
+        ),
         onSignOut: widget.onSignOut,
         repository: _listingsRepository,
         onOpenListing: _openListingDetail,
@@ -135,7 +146,7 @@ class _AppShellState extends State<AppShell> {
               children: [
                 Expanded(
                   child: _NavItem(
-                    label: 'Home',
+                    label: '首页',
                     icon: Icons.home_rounded,
                     selected: _selectedIndex == 0,
                     onTap: () => _selectTab(0),
@@ -143,7 +154,7 @@ class _AppShellState extends State<AppShell> {
                 ),
                 Expanded(
                   child: _NavItem(
-                    label: 'Search',
+                    label: '搜索',
                     icon: Icons.manage_search_rounded,
                     selected: _selectedIndex == 1,
                     onTap: () => _selectTab(1),
@@ -179,7 +190,7 @@ class _AppShellState extends State<AppShell> {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            'Post',
+                            '发布',
                             style: Theme.of(context).textTheme.labelSmall
                                 ?.copyWith(
                                   color: AppColors.text,
@@ -193,7 +204,7 @@ class _AppShellState extends State<AppShell> {
                 ),
                 Expanded(
                   child: _NavItem(
-                    label: 'Chat',
+                    label: '消息',
                     icon: Icons.chat_bubble_rounded,
                     selected: _selectedIndex == 3,
                     onTap: () => _selectTab(3),
@@ -201,7 +212,7 @@ class _AppShellState extends State<AppShell> {
                 ),
                 Expanded(
                   child: _NavItem(
-                    label: 'Profile',
+                    label: '我的',
                     icon: Icons.person_rounded,
                     selected: _selectedIndex == 4,
                     onTap: () => _selectTab(4),

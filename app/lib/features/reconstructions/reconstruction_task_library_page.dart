@@ -134,7 +134,7 @@ class _ReconstructionTaskLibraryPageState
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('3DGS 任务库'),
+        title: const Text('3D 建模任务'),
         actions: [
           IconButton(
             onPressed: _isLoading ? null : _loadTasks,
@@ -254,13 +254,13 @@ class _ReconstructionTaskLibraryPageState
                     if (task.canOpenViewer)
                       OutlinedButton(
                         onPressed: () => _openViewer(task),
-                        child: const Text('打开 Viewer'),
+                        child: const Text('3D 预览'),
                       ),
                     if (task.hasPublishedListing &&
                         widget.onOpenListing != null)
                       OutlinedButton(
                         onPressed: () => widget.onOpenListing!(task.listingId!),
-                        child: const Text('打开 Listing'),
+                        child: const Text('查看商品'),
                       ),
                   ],
                 ),

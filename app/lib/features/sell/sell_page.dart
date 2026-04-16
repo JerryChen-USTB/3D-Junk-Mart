@@ -22,8 +22,6 @@ class SellPage extends StatelessWidget {
   final ValueChanged<String> onOpenListing;
   final VoidCallback? onMarketplaceChanged;
 
-  Uri get _serviceRoot => Uri.parse(apiClient.baseUrl).resolve('/');
-
   @override
   Widget build(BuildContext context) {
     return SafeArea(
@@ -32,14 +30,8 @@ class SellPage extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 128),
         children: [
           EditorialScreenHeader(
-            title: 'Sell in 3D',
+            title: '发布 3D 商品',
             onBack: onGoHome,
-            trailing: Text(
-              '3DGS',
-              style: Theme.of(
-                context,
-              ).textTheme.labelLarge?.copyWith(color: AppColors.textMuted),
-            ),
           ),
           const SizedBox(height: 16),
           Container(
@@ -52,12 +44,12 @@ class SellPage extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Capture once,\npublish in 3D.',
+                  '拍一段视频，\n发布 3D 商品。',
                   style: Theme.of(context).textTheme.headlineMedium,
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  '这里接入的是完整的 3DGS 工作流：上传视频、远程训练、Mask 标注、Viewer 校准、发布到 marketplace。',
+                  '拍摄商品环绕视频，自动生成 3D 展示模型，发布到市场。',
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
                 const SizedBox(height: 14),
@@ -65,9 +57,9 @@ class SellPage extends StatelessWidget {
                   spacing: 8,
                   runSpacing: 8,
                   children: const [
-                    EditorialPill(label: 'Remote trainer', filled: true),
-                    EditorialPill(label: 'Mask preview'),
-                    EditorialPill(label: 'Viewer calibration'),
+                    EditorialPill(label: '智能建模', filled: true),
+                    EditorialPill(label: '背景去除'),
+                    EditorialPill(label: '展示校准'),
                   ],
                 ),
                 const SizedBox(height: 16),
@@ -84,16 +76,16 @@ class SellPage extends StatelessWidget {
                       ),
                     );
                   },
-                  child: const Text('Start 3DGS Flow'),
+                  child: const Text('开始创建 3D 商品'),
                 ),
               ],
             ),
           ),
           const SizedBox(height: 16),
           EditorialActionCard(
-            title: 'Task Library',
+            title: '任务管理',
             subtitle:
-                'Resume a task, inspect status, reopen viewer, or jump to a published listing',
+                '查看建模进度、继续未完成的任务、或查看已发布的商品',
             icon: Icons.inventory_2_rounded,
             onTap: () {
               Navigator.of(context).push(
@@ -104,30 +96,6 @@ class SellPage extends StatelessWidget {
                     onMarketplaceChanged: onMarketplaceChanged,
                     onOpenListing: onOpenListing,
                   ),
-                ),
-              );
-            },
-          ),
-          EditorialActionCard(
-            title: 'Backend Route',
-            subtitle:
-                'Flutter -> ${_serviceRoot.host}:8000/api/v1/reconstructions -> trainer_service',
-            icon: Icons.route_rounded,
-            onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('当前 API Base: ${apiClient.baseUrl}')),
-              );
-            },
-          ),
-          EditorialActionCard(
-            title: 'What Publish Does',
-            subtitle:
-                'After the task is ready, publish will also sync a real marketplace listing',
-            icon: Icons.storefront_rounded,
-            onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('发布后会生成/更新 listing，并回写 listing_id 到任务。'),
                 ),
               );
             },

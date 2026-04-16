@@ -6,9 +6,7 @@ import '../../theme/app_colors.dart';
 import '../../widgets/editorial_widgets.dart';
 
 class MessagesPage extends StatelessWidget {
-  const MessagesPage({super.key, required this.onOpenChat});
-
-  final VoidCallback onOpenChat;
+  const MessagesPage({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -41,7 +39,7 @@ class MessagesPage extends StatelessWidget {
                         SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            'Search conversations...',
+                            '搜索对话...',
                             style: TextStyle(
                               color: AppColors.textMuted,
                               fontSize: 13,
@@ -64,36 +62,41 @@ class MessagesPage extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
-              children: [
-                _PreviewCard(onOpenChat: onOpenChat),
-                const SizedBox(height: 16),
-                EditorialSectionHeader(
-                  title: 'Recent threads',
-                  actionLabel: 'All',
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 88,
+                      height: 88,
+                      decoration: BoxDecoration(
+                        color: AppColors.surface,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.chat_bubble_outline_rounded,
+                        size: 40,
+                        color: AppColors.textMuted,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Text(
+                      '暂无消息',
+                      style: Theme.of(context).textTheme.headlineSmall,
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      '与卖家沟通后，对话会出现在这里',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: AppColors.textMuted,
+                          ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 12),
-                _ThreadTile(
-                  name: 'Julian Thorne',
-                  message: 'Can you ship it today if I buy it now?',
-                  time: '2m',
-                  highlight: true,
-                  onTap: onOpenChat,
-                ),
-                _ThreadTile(
-                  name: 'Sarah L.',
-                  message: 'I\'ll take the headphones if they include the case.',
-                  time: '14m',
-                  onTap: onOpenChat,
-                ),
-                _ThreadTile(
-                  name: 'Marcus J.',
-                  message: 'What\'s the lens condition and serial range?',
-                  time: '1h',
-                  onTap: onOpenChat,
-                ),
-              ],
+              ),
             ),
           ),
         ],

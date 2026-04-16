@@ -303,7 +303,7 @@ class ListingHeroBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 236,
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           colors: [Color(0xFFFFD34D), Color(0xFFF5E8AB)],
@@ -319,60 +319,32 @@ class ListingHeroBanner extends StatelessWidget {
           ),
         ],
       ),
-      child: Stack(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Positioned(
-            left: 18,
-            top: 18,
-            child: EditorialPill(
-              label: badge,
-              backgroundColor: Colors.white.withValues(alpha: 0.64),
-              foregroundColor: AppColors.primary,
+          EditorialPill(
+            label: badge,
+            backgroundColor: Colors.white.withValues(alpha: 0.64),
+            foregroundColor: AppColors.primary,
+          ),
+          const SizedBox(height: 12),
+          Text(
+            title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+              color: AppColors.primary,
+              height: 1.1,
             ),
           ),
-          Positioned(
-            left: 18,
-            top: 66,
-            right: 140,
-            child: Text(
-              title,
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                color: AppColors.primary,
-                height: 0.98,
-              ),
-            ),
-          ),
-          Positioned(
-            left: 18,
-            right: 140,
-            bottom: 18,
-            child: Text(
-              subtitle,
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: AppColors.primary.withValues(alpha: 0.8),
-                height: 1.45,
-              ),
-            ),
-          ),
-          Positioned(
-            right: 18,
-            top: 18,
-            bottom: 18,
-            child: Container(
-              width: 122,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(28),
-                color: Colors.white.withValues(alpha: 0.26),
-              ),
-              child: const Icon(
-                Icons.view_in_ar_rounded,
-                size: 56,
-                color: AppColors.primary,
-              ),
+          const SizedBox(height: 8),
+          Text(
+            subtitle,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: AppColors.primary.withValues(alpha: 0.8),
+              height: 1.45,
             ),
           ),
         ],

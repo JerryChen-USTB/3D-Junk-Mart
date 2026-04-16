@@ -172,9 +172,9 @@ class MarketplaceStore:
         self.connection.commit()
 
     def _seed_if_needed(self) -> None:
-        if self.count_records("user") > 0:
-            return
-        self.seed_demo_data()
+        # Disabled: production mode starts with an empty marketplace.
+        # Users create their own listings via the 3D publish flow.
+        pass
 
     def close(self) -> None:
         try:

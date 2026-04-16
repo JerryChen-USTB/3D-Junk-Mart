@@ -401,7 +401,7 @@ class _ReconstructionPublishFlowPageState
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('3DGS 发布流'),
+        title: const Text('发布 3D 商品'),
         actions: [
           IconButton(
             onPressed: task == null || _isRefreshingTask
@@ -562,14 +562,14 @@ class _FlowHeroCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Video to 3D listing',
+            '视频变 3D 商品',
             style: Theme.of(
               context,
             ).textTheme.headlineSmall?.copyWith(color: AppColors.primary),
           ),
           const SizedBox(height: 8),
           Text(
-            '上传环绕视频后，当前 App 会依次经过远程训练、Mask 交互、Viewer 校准，再把结果发布回 marketplace listing。',
+            '拍摄或选择商品环绕视频，系统会自动完成 3D 建模，完成校准后即可发布。',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
               color: AppColors.primary.withValues(alpha: 0.86),
             ),
@@ -788,7 +788,7 @@ class _TrainingCard extends StatelessWidget {
               task == null
                   ? '先创建任务，再选择质量档位和训练步数。'
                   : enabled
-                  ? '任务已上传，可以手动启动远程 3DGS 流水线。'
+                  ? '视频已上传，选择建模参数后即可开始。'
                   : '当前任务已经进入流程，训练参数以服务器记录为准。',
             ),
             const SizedBox(height: 12),
@@ -873,7 +873,7 @@ class _TaskMonitorCard extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(
-                    '3. 流程监控',
+                    '3. 建模进度',
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                 ),
@@ -922,9 +922,9 @@ class _ViewerWorkflowCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('4. Viewer 校准', style: Theme.of(context).textTheme.titleLarge),
+            Text('4. 3D 展示校准', style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 8),
-            const Text('模型 ready 后，按顺序完成朝向、平移、初始视角和动画确认。'),
+            const Text('模型建成后，按顺序完成朝向、平移、初始视角和动画确认。'),
             const SizedBox(height: 12),
             _ViewerStepTile(
               title: '朝向校准',
@@ -966,7 +966,7 @@ class _ViewerWorkflowCard extends StatelessWidget {
                 );
               },
               icon: const Icon(Icons.open_in_full_rounded),
-              label: const Text('直接打开 Viewer'),
+              label: const Text('直接预览 3D 模型'),
             ),
           ],
         ),
@@ -1054,16 +1054,16 @@ class _PublishCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              '5. 发布到 Marketplace',
+              '5. 发布商品',
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 8),
             Text(
               task.isPublished
-                  ? '当前任务已经生成 marketplace listing，并可从首页/搜索/详情页进入。'
+                  ? '当前任务已发布成功，可从首页或搜索查看。'
                   : task.viewerWorkflowComplete
-                  ? 'Viewer 步骤已经完成，可以发布到 marketplace。'
-                  : '建议先完成 Viewer 的四个步骤，再执行最终发布。',
+                  ? '3D 展示校准已完成，可以发布商品了。'
+                  : '建议先完成 3D 展示校准，再执行最终发布。',
             ),
             const SizedBox(height: 12),
             FilledButton.icon(
@@ -1078,7 +1078,7 @@ class _PublishCard extends StatelessWidget {
               label: Text(
                 isPublishing
                     ? '发布中...'
-                    : (task.isPublished ? '已发布' : '发布到 Marketplace'),
+                    : (task.isPublished ? '已发布' : '发布商品'),
               ),
             ),
             if (task.hasPublishedListing && onOpenListing != null) ...[
@@ -1086,7 +1086,7 @@ class _PublishCard extends StatelessWidget {
               OutlinedButton.icon(
                 onPressed: onOpenListing,
                 icon: const Icon(Icons.storefront_rounded),
-                label: Text('打开 Listing ${task.listingId}'),
+                label: Text('查看已发布商品'),
               ),
             ],
           ],
