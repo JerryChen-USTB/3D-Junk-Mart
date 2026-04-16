@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import sqlite3
@@ -9,7 +10,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from shared.config import BUSINESS_DB_PATH, TRAINER_SERVICE_BASE_URL, TRAINER_SERVICE_PUBLIC_BASE_URL
+from shared.config import BUSINESS_DB_PATH, STORAGE_ROOT, TRAINER_SERVICE_BASE_URL, TRAINER_SERVICE_PUBLIC_BASE_URL
 
 RECORD_TYPES = {
     "user",
@@ -79,6 +80,49 @@ def _generate_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
 
+_PLACEHOLDER_JPEG = base64.b64decode(
+    "/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEAAkGBxAQEBUQEBAVFRUVFRUVFRUVFRUVFRUVFRUWFhUVFRUYHSggGBolHRUV"
+    "ITEhJSkrLi4uFx8zODMsNygtLisBCgoKDg0OGhAQGzAlICYtLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0t"
+    "LS0tLS0tLS0tLS0tLf/AABEIAAEAAQMBEQACEQEDEQH/xAAXAAADAQAAAAAAAAAAAAAAAAAAAQMC/8QAFBABAAAAAAAA"
+    "AAAAAAAAAAAAAP/aAAwDAQACEAMQAAAB6gD/xAAVEAEBAAAAAAAAAAAAAAAAAAAAEf/aAAgBAQABBQL/xAAVEQEBAAAA"
+    "AAAAAAAAAAAAAEf/aAAgBAwEBPwF//8QAFBEBAAAAAAAAAAAAAAAAAAAAEP/aAAgBAgEBPwB//8QAFBABAAAAAAAAAAAA"
+    "AAAAAAAAAP/aAAgBAQAGPwJ//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPyF//9k="
+)
+_PLACEHOLDER_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7Z0kQAAAAASUVORK5CYII="
+)
+_PLACEHOLDER_MP4 = b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom"
+_SEED_PLACEHOLDER_ASSETS = {
+    "avatars/buyer.png": _PLACEHOLDER_PNG,
+    "avatars/seller.png": _PLACEHOLDER_PNG,
+    "avatars/support.png": _PLACEHOLDER_PNG,
+    "banners/banner.jpg": _PLACEHOLDER_JPEG,
+    "banners/banner_thumb.jpg": _PLACEHOLDER_JPEG,
+    "listings/3dgs_cover.jpg": _PLACEHOLDER_JPEG,
+    "listings/3dgs_cover_thumb.jpg": _PLACEHOLDER_JPEG,
+    "listings/bag_1.jpg": _PLACEHOLDER_JPEG,
+    "listings/bag_cover.jpg": _PLACEHOLDER_JPEG,
+    "listings/bag_cover_thumb.jpg": _PLACEHOLDER_JPEG,
+    "listings/camera_1.jpg": _PLACEHOLDER_JPEG,
+    "listings/camera_2.jpg": _PLACEHOLDER_JPEG,
+    "listings/camera_cover.jpg": _PLACEHOLDER_JPEG,
+    "listings/camera_cover_thumb.jpg": _PLACEHOLDER_JPEG,
+    "listings/chair_1.jpg": _PLACEHOLDER_JPEG,
+    "listings/chair_cover.jpg": _PLACEHOLDER_JPEG,
+    "listings/chair_cover_thumb.jpg": _PLACEHOLDER_JPEG,
+    "listings/3dgs_demo.mp4": _PLACEHOLDER_MP4,
+    "reviews/review_1.jpg": _PLACEHOLDER_JPEG,
+    "reviews/review_1_thumb.jpg": _PLACEHOLDER_JPEG,
+}
+
+
+def _write_bytes_if_missing(path: Path, payload: bytes) -> None:
+    if path.exists():
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(payload)
+
+
 class MarketplaceStore:
     def __init__(self, db_path: Path | None = None) -> None:
         self.db_path = Path(db_path or BUSINESS_DB_PATH)
@@ -87,6 +131,7 @@ class MarketplaceStore:
         self.connection.row_factory = sqlite3.Row
         self._configure_connection()
         self._ensure_schema()
+        self._ensure_seed_assets()
         self._seed_if_needed()
 
     def _configure_connection(self) -> None:
@@ -222,6 +267,11 @@ class MarketplaceStore:
 
     def _seed(self, entity_type: str, entity_id: str, payload: dict[str, Any], parent_id: str | None = None) -> None:
         self.upsert_record(entity_type, entity_id, payload, parent_id=parent_id)
+
+    def _ensure_seed_assets(self) -> None:
+        seed_root = STORAGE_ROOT / "seed"
+        for relative_path, payload in _SEED_PLACEHOLDER_ASSETS.items():
+            _write_bytes_if_missing(seed_root / relative_path, payload)
 
     def seed_demo_data(self) -> None:
         now = _utc_now()

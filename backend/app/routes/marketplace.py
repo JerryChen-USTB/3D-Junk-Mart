@@ -190,6 +190,7 @@ def _listing_summary(store: MarketplaceStore, listing_record: dict[str, Any]) ->
         "location": payload.get("location_city"),
         "badges": list(payload.get("badges_json") or []),
         "seller": seller,
+        "viewer_url": payload.get("viewer_url"),
     }
 
 

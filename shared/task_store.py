@@ -116,6 +116,8 @@ def build_task_record(
     source_filename: str,
     video_path: Path,
     video_metadata: dict[str, Any] | None = None,
+    seller_id: str | None = None,
+    listing_id: str | None = None,
 ) -> dict[str, Any]:
     created_at = now_iso()
     return {
@@ -123,6 +125,8 @@ def build_task_record(
         "title": title,
         "description": description,
         "price": price,
+        "seller_id": seller_id,
+        "listing_id": listing_id,
         "status": "uploaded",
         "progress": 0,
         "status_message": "任务已创建，等待进入流水线",

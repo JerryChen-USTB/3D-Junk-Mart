@@ -557,6 +557,7 @@ class SearchFacetPayload(BaseModel):
 
 class ReconstructionTaskResponse(BaseModel):
     task_id: str
+    listing_id: str | None = None
     title: str
     description: str
     price: str

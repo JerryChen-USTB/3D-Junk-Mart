@@ -12,6 +12,7 @@ class ListingSummary {
     required this.coverImageUrl,
     required this.sellerName,
     required this.status,
+    this.viewerUrl,
   });
 
   final String id;
@@ -24,6 +25,7 @@ class ListingSummary {
   final String? coverImageUrl;
   final String sellerName;
   final String status;
+  final String? viewerUrl;
 
   bool get has3dBadge => badges.any(
         (badge) => badge.toLowerCase().contains('3d'),
@@ -50,6 +52,10 @@ class ListingSummary {
       ),
       sellerName: seller['display_name']?.toString() ?? 'Marketplace seller',
       status: json['status']?.toString() ?? 'unknown',
+      viewerUrl: _resolveUrl(
+        json['viewer_url']?.toString(),
+        apiRoot,
+      ),
     );
   }
 }

@@ -1,4 +1,7 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../core/listings/listing_models.dart';
 import '../../theme/app_colors.dart';
@@ -19,6 +22,7 @@ class ListingCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final topHeight = tall ? 198.0 : 168.0;
+    final hasViewer = listing.viewerUrl != null && listing.viewerUrl!.isNotEmpty;
 
     return Material(
       color: Colors.transparent,
@@ -40,18 +44,27 @@ class ListingCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _ListingCover(
-                imageUrl: listing.coverImageUrl,
-                title: listing.title,
-                subtitle: listing.location,
-                badge: listing.badges.isNotEmpty
-                    ? listing.badges.first
-                    : listing.has3dBadge
-                    ? '3D'
-                    : '在售',
-                height: topHeight,
-                highlight3d: listing.has3dBadge,
-              ),
+              if (hasViewer)
+                _ViewerCover(
+                  viewerUrl: listing.viewerUrl!,
+                  badge: listing.badges.isNotEmpty
+                      ? listing.badges.first
+                      : '3D 展示',
+                  height: topHeight,
+                )
+              else
+                _ListingCover(
+                  imageUrl: listing.coverImageUrl,
+                  title: listing.title,
+                  subtitle: listing.location,
+                  badge: listing.badges.isNotEmpty
+                      ? listing.badges.first
+                      : listing.has3dBadge
+                      ? '3D'
+                      : '在售',
+                  height: topHeight,
+                  highlight3d: listing.has3dBadge,
+                ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
                 child: Column(
@@ -131,6 +144,144 @@ class ListingCard extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ViewerCover extends StatefulWidget {
+  const _ViewerCover({
+    required this.viewerUrl,
+    required this.badge,
+    required this.height,
+  });
+
+  final String viewerUrl;
+  final String badge;
+  final double height;
+
+  @override
+  State<_ViewerCover> createState() => _ViewerCoverState();
+}
+
+class _ViewerCoverState extends State<_ViewerCover> {
+  late final WebViewController _controller;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(const Color(0xFF1A1A1A))
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onPageFinished: (_) {
+            // Hide all UI and reduce render quality for embed mode.
+            _controller.runJavaScript('''
+              document.body.classList.add('embed');
+              var selectors = ['.hud', '.animation-panel', '#minimal-reset-view', '.overlay'];
+              selectors.forEach(function(sel) {
+                var els = document.querySelectorAll(sel);
+                els.forEach(function(el) { el.style.display = 'none'; });
+              });
+
+              // Lower canvas resolution for card performance.
+              var canvas = document.querySelector('canvas');
+              if (canvas) {
+                var dpr = Math.min(window.devicePixelRatio, 1.0);
+                canvas.width  = canvas.clientWidth  * dpr;
+                canvas.height = canvas.clientHeight * dpr;
+              }
+            ''');
+            if (mounted) setState(() => _loading = false);
+          },
+        ),
+      )
+      ..loadRequest(_embedUrl(widget.viewerUrl));
+  }
+
+  /// Append `embed=1` so the viewer hides all UI controls via CSS too.
+  static Uri _embedUrl(String url) {
+    final uri = Uri.parse(url);
+    final params = Map<String, String>.from(uri.queryParameters);
+    params['embed'] = '1';
+    return uri.replace(queryParameters: params);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(26)),
+      child: SizedBox(
+        height: widget.height,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            // Dark background behind the viewer.
+            const DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Color(0xFF141414), Color(0xFF3F463C)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+              ),
+            ),
+            // WebView with eager gesture recognizer to prevent scroll conflicts.
+            WebViewWidget(
+              controller: _controller,
+              gestureRecognizers: {
+                Factory<OneSequenceGestureRecognizer>(
+                  () => EagerGestureRecognizer(),
+                ),
+              },
+            ),
+            // Loading spinner.
+            if (_loading)
+              const Center(
+                child: SizedBox(
+                  width: 28,
+                  height: 28,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.4,
+                    color: Colors.white54,
+                  ),
+                ),
+              ),
+            // Badge overlay — use IgnorePointer so touches pass through.
+            Positioned(
+              left: 14,
+              top: 14,
+              child: IgnorePointer(
+                child: EditorialPill(
+                  label: widget.badge,
+                  backgroundColor: Colors.white.withValues(alpha: 0.74),
+                  foregroundColor: AppColors.primary,
+                ),
+              ),
+            ),
+            // 3D icon watermark — use IgnorePointer.
+            Positioned(
+              right: 10,
+              bottom: 10,
+              child: IgnorePointer(
+                child: Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.4),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(
+                    Icons.view_in_ar_rounded,
+                    size: 18,
+                    color: Colors.white70,
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

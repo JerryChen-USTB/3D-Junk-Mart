@@ -396,3 +396,15 @@ button.danger {
     flex-direction: column;
   }
 }
+
+/* ── Embed mode: pure viewer, no UI ────────────────────────── */
+body.embed {
+  background: #141414;
+}
+
+body.embed .hud,
+body.embed .animation-panel,
+body.embed #minimal-reset-view,
+body.embed .overlay {
+  display: none !important;
+}

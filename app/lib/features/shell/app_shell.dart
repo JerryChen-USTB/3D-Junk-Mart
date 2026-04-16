@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/api/api_client.dart';
 import '../../core/listings/listings_repository.dart';
+import '../../core/session/app_session.dart';
 import '../chat/chat_pages.dart';
 import '../home/home_page.dart';
 import '../listings/listing_detail_page.dart';
@@ -18,10 +19,12 @@ class AppShell extends StatefulWidget {
     super.key,
     required this.onSignOut,
     required this.apiClient,
+    required this.session,
   });
 
   final Future<void> Function() onSignOut;
   final ApiClient apiClient;
+  final AppSession session;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -29,6 +32,7 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   int _selectedIndex = 0;
+  int _marketplaceVersion = 0;
   late final ListingsRepository _listingsRepository;
 
   @override
@@ -61,10 +65,17 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
+  void _markMarketplaceDirty() {
+    setState(() {
+      _marketplaceVersion += 1;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final pages = <Widget>[
       HomePage(
+        key: ValueKey('home-$_marketplaceVersion'),
         repository: _listingsRepository,
         onGoSearch: () => _selectTab(1),
         onOpenListing: _openListingDetail,
@@ -74,22 +85,28 @@ class _AppShellState extends State<AppShell> {
         onOpenSuccess: () => _openPage(buildPaymentSuccessDemoPage),
       ),
       SearchPage(
+        key: ValueKey('search-$_marketplaceVersion'),
         repository: _listingsRepository,
         onGoHome: () => _selectTab(0),
         onOpenListing: _openListingDetail,
       ),
       SellPage(
+        apiClient: widget.apiClient,
+        accessToken: widget.session.accessToken,
         onGoHome: () => _selectTab(0),
-        onOpenSuccess: () => _openPage(buildPaymentSuccessDemoPage),
-        onOpenReview: () => _openPage(buildReviewDemoPage),
+        onOpenListing: _openListingDetail,
+        onMarketplaceChanged: _markMarketplaceDirty,
       ),
       MessagesPage(onOpenChat: () => _openPage(buildChatDetailDemoPage)),
       ProfilePage(
+        key: ValueKey('profile-$_marketplaceVersion'),
         onOpenOrder: () => _openPage(buildOrderDetailDemoPage),
         onOpenReview: () => _openPage(buildReviewDemoPage),
         onOpenSuccess: () => _openPage(buildPaymentSuccessDemoPage),
         onOpenSettings: () => _openPage(buildProfileSettingsDemoPage),
         onSignOut: widget.onSignOut,
+        repository: _listingsRepository,
+        onOpenListing: _openListingDetail,
       ),
     ];
 

@@ -21,6 +21,7 @@ storage/tasks/*
 storage/uploads/*
 storage/processed/*
 storage/models/*
+storage/seed/*
 !storage/.gitkeep
 !storage/db/.gitkeep
 !storage/tasks/.gitkeep
@@ -30,3 +31,6 @@ storage/models/*
 
 # GitHub PAT (do not commit)
 github_pat.txt
+
+# Local machine notes / runbooks
+LOCAL_RUN_3DV_JUNK_MART.md

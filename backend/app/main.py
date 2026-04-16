@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi import HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,7 +14,7 @@ from backend.app.routes.reconstructions import router as reconstructions_router
 from backend.app.schemas import HealthResponse
 from backend.app.services.marketplace_store import get_store
 from shared.task_store import ensure_layout
-from shared.config import STORAGE_ROOT, VIEWER_ROOT
+from shared.config import GS_SERVICE_BASE_URL, STORAGE_ROOT, VIEWER_ROOT
 
 STORAGE_ROOT.mkdir(parents=True, exist_ok=True)
 VIEWER_ROOT.mkdir(parents=True, exist_ok=True)
@@ -71,6 +71,71 @@ async def validation_exception_handler(request, exc: RequestValidationError):
 def startup() -> None:
     ensure_layout()
     get_store()
+
+
+# ---------------------------------------------------------------------------
+# Reverse proxy: forward /proxy/storage/... requests to the remote trainer
+# service so that the phone (connected via USB to localhost) can access
+# model files hosted on the remote server without a direct connection.
+# ---------------------------------------------------------------------------
+import httpx
+from fastapi.responses import StreamingResponse
+
+_proxy_client: httpx.AsyncClient | None = None
+
+
+def _get_proxy_client() -> httpx.AsyncClient:
+    global _proxy_client
+    if _proxy_client is None or _proxy_client.is_closed:
+        _proxy_client = httpx.AsyncClient(timeout=120.0)
+    return _proxy_client
+
+
+@app.on_event("shutdown")
+async def _close_proxy_client() -> None:
+    global _proxy_client
+    if _proxy_client is not None:
+        await _proxy_client.aclose()
+        _proxy_client = None
+
+
+@app.api_route("/proxy/storage/{path:path}", methods=["GET", "HEAD"])
+async def proxy_remote_storage(path: str, request: Request):
+    """Proxy storage file requests to the remote trainer service."""
+    remote_url = f"{GS_SERVICE_BASE_URL.rstrip('/')}/storage/{path}"
+
+    # Forward query string (e.g. cache-busting ?v=...)
+    if request.url.query:
+        remote_url += f"?{request.url.query}"
+
+    client = _get_proxy_client()
+    try:
+        remote_response = await client.request(
+            method=request.method,
+            url=remote_url,
+            headers={
+                k: v for k, v in request.headers.items()
+                if k.lower() not in ("host", "connection")
+            },
+        )
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to reach trainer service: {exc}")
+
+    # Stream the response back to the client
+    response_headers = dict(remote_response.headers)
+    # Remove hop-by-hop headers
+    for header in ("transfer-encoding", "connection", "keep-alive"):
+        response_headers.pop(header, None)
+
+    # Add CORS headers for WebView cross-origin requests
+    response_headers["Access-Control-Allow-Origin"] = "*"
+
+    return StreamingResponse(
+        content=remote_response.aiter_bytes(chunk_size=65536),
+        status_code=remote_response.status_code,
+        headers=response_headers,
+        media_type=response_headers.get("content-type"),
+    )
 
 app.mount(
     "/storage",

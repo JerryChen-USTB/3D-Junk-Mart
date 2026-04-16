@@ -20,6 +20,7 @@ from backend.app.schemas import (
     ViewerConfigUpdate,
 )
 from backend.app.services.trainer_service_client import TrainerServiceError, get_trainer_service_client
+from shared.config import GS_SERVICE_BASE_URL
 from shared.task_store import (
     REPO_ROOT,
     STORAGE_ROOT,
@@ -159,9 +160,45 @@ def _validate_uploaded_video(video_path: Path) -> dict[str, object]:
     return metadata
 
 
+def _resolve_seller_id(request: Request, store) -> str:
+    """Best-effort resolution of the current user's seller id.
+
+    Falls back to the demo user if no valid bearer token is present.
+    """
+    header = request.headers.get("authorization") or request.headers.get("Authorization")
+    token = None
+    if header and header.lower().startswith("bearer "):
+        token = header.split(" ", 1)[1].strip() or None
+    try:
+        user = store.current_user(token)
+        return user["entity_id"]
+    except Exception:
+        return store.default_user_id()
+
+
+def _rewrite_remote_url(url: str | None) -> str | None:
+    """Rewrite remote trainer service absolute URLs to local proxy paths.
+
+    When the trainer service returns URLs like
+    ``http://222.199.216.192:9000/storage/models/.../model.ply``,
+    the phone (connected via USB) cannot reach the remote server directly.
+    This function rewrites such URLs to ``/proxy/storage/models/.../model.ply``
+    so the local backend can proxy the request.
+    """
+    if not url:
+        return url
+    remote_base = GS_SERVICE_BASE_URL.rstrip("/")
+    if remote_base and url.startswith(remote_base + "/"):
+        return "/proxy" + url[len(remote_base):]
+    return url
+
+
 def _absolute_url(request: Request, rel_url: str | None) -> str | None:
     if not rel_url:
         return None
+
+    # Rewrite remote absolute URLs to local proxy paths first.
+    rel_url = _rewrite_remote_url(rel_url) or rel_url
 
     if rel_url.startswith("http://") or rel_url.startswith("https://"):
         return rel_url
@@ -273,9 +310,12 @@ def _serialize_task(request: Request, task: dict) -> ReconstructionTaskResponse:
     if explicit_viewer_url:
         viewer_rel_url = explicit_viewer_url
     elif model_rel_url:
+        # Rewrite remote absolute URLs to local proxy paths so the phone
+        # can reach the model through the local backend.
+        proxied_model_url = _rewrite_remote_url(model_rel_url) or model_rel_url
         query = {
             "task_id": task["task_id"],
-            "model": quote(model_rel_url, safe='/:'),
+            "model": str(proxied_model_url),
             "viewer_build": VIEWER_BUILD_VERSION,
         }
         model_path = _storage_url_to_path(model_rel_url)
@@ -287,6 +327,7 @@ def _serialize_task(request: Request, task: dict) -> ReconstructionTaskResponse:
 
     return ReconstructionTaskResponse(
         task_id=task["task_id"],
+        listing_id=task.get("listing_id"),
         title=task.get("title", ""),
         description=task.get("description", ""),
         price=task.get("price", ""),
@@ -642,7 +683,7 @@ async def create_reconstruction(
     if not video.filename:
         raise HTTPException(status_code=400, detail="Missing video filename.")
 
-    if video.content_type and not video.content_type.startswith("video/"):
+    if video.content_type and not video.content_type.startswith("video/") and video.content_type != "application/octet-stream":
         raise HTTPException(status_code=400, detail="Uploaded file must be a video.")
 
     upload_task_id = generate_task_id()
@@ -889,7 +930,95 @@ async def get_reconstruction(request: Request, task_id: str) -> ReconstructionTa
 
     task = _refresh_task_from_remote(task)
 
+    # Auto-create marketplace listing for tasks published before the sync code.
+    _ensure_marketplace_listing(request, task)
+    # Re-read in case listing_id was written back.
+    task = get_task(task_id) or task
+
     return _serialize_task(request, task)
+
+
+def _ensure_marketplace_listing(request: Request, task: dict) -> str | None:
+    """Create or update a marketplace listing for a published task.
+
+    Returns the listing_id if a listing was created/updated, else None.
+    This is idempotent — safe to call repeatedly for the same task.
+    """
+    if not task.get("is_published"):
+        return task.get("listing_id")
+    if not task.get("model_rel_path"):
+        return task.get("listing_id")
+
+    from datetime import datetime, timezone
+    import uuid
+    from backend.app.services.marketplace_store import get_store
+
+    store = get_store()
+    task_id = task["task_id"]
+    listing_id = task.get("listing_id") or f"listing_{uuid.uuid4().hex[:12]}"
+
+    # Skip if the listing already exists in the store.
+    existing = store.get_record("listing", listing_id)
+    if existing is not None:
+        return listing_id
+
+    now = datetime.now(timezone.utc).isoformat()
+    seller_id = _resolve_seller_id(request, store)
+
+    price_str = task.get("price", "0")
+    try:
+        price_minor = int(float(price_str) * 100)
+    except (ValueError, TypeError):
+        price_minor = 0
+
+    model_rel_url = task.get("model_rel_path")
+    listing_viewer_url = None
+    if model_rel_url:
+        proxied_model_url = _rewrite_remote_url(model_rel_url) or model_rel_url
+        query = {
+            "task_id": task_id,
+            "model": str(proxied_model_url),
+            "viewer_build": VIEWER_BUILD_VERSION,
+        }
+        query.update(_load_viewer_query(task_id))
+        listing_viewer_url = "/viewer/index.html?" + urlencode(query)
+
+    listing_payload = {
+        "id": listing_id,
+        "seller_id": seller_id,
+        "category_id": "cat_tech",
+        "title": task.get("title") or "3D Listing",
+        "subtitle": task.get("description", ""),
+        "description": task.get("description", ""),
+        "price_minor": price_minor,
+        "original_price_minor": None,
+        "currency": "CNY",
+        "status": "live",
+        "condition_level": None,
+        "location_city": None,
+        "cover_media_json": None,
+        "badges_json": ["3D \u5c55\u793a"],
+        "model_url": _rewrite_remote_url(model_rel_url) or model_rel_url,
+        "model_ply_url": _rewrite_remote_url(task.get("model_ply_rel_path")),
+        "model_sog_url": _rewrite_remote_url(task.get("model_sog_rel_path")),
+        "model_format": task.get("model_format"),
+        "viewer_url": listing_viewer_url,
+        "log_url": None,
+        "remote_task_id": task_id,
+        "object_masking": bool(task.get("object_masking", False)),
+        "quality_profile": task.get("quality_profile"),
+        "preview_status": "ready",
+        "published_at": task.get("published_at") or now,
+        "created_at": task.get("created_at") or now,
+        "updated_at": now,
+    }
+    store.upsert_record("listing", listing_id, listing_payload)
+
+    # Persist listing_id back to the task if it was missing.
+    if not task.get("listing_id"):
+        update_task(task_id, listing_id=listing_id)
+
+    return listing_id
 
 
 @router.post("/{task_id}/publish", response_model=ReconstructionTaskResponse)
@@ -907,10 +1036,14 @@ async def publish_reconstruction(request: Request, task_id: str) -> Reconstructi
     if not task.get("model_rel_path"):
         raise HTTPException(status_code=400, detail="Task has no generated model.")
 
+    # Create the marketplace listing (idempotent).
+    listing_id = _ensure_marketplace_listing(request, task)
+
     updated_task = update_task(
         task_id,
         is_published=True,
         published_at=task.get("published_at") or now_iso(),
+        listing_id=listing_id,
         status_message="商品已发布，可在首页和详情页中查看 3D 展示",
         error_message=None,
     )
@@ -997,6 +1130,14 @@ async def list_reconstructions(
             statuses = parsed
 
     tasks = [_refresh_task_from_remote(task) for task in list_tasks()]
+    if statuses is not None:
+        tasks = [task for task in tasks if task.get("status") in statuses]
+
+    # Auto-create marketplace listings for tasks published before the sync code.
+    for task in tasks:
+        _ensure_marketplace_listing(request, task)
+    # Re-read tasks to pick up any listing_id written back.
+    tasks = list_tasks()
     if statuses is not None:
         tasks = [task for task in tasks if task.get("status") in statuses]
 

@@ -157,7 +157,11 @@ class _JunkMartAppState extends State<JunkMartApp> {
       home: _bootstrapping
           ? const _BootstrapScreen()
           : _session != null
-          ? AppShell(onSignOut: _signOut, apiClient: _apiClient)
+          ? AppShell(
+              onSignOut: _signOut,
+              apiClient: _apiClient,
+              session: _session!,
+            )
           : _authViewMode == _AuthViewMode.login
           ? AuthLoginPage(
               onSubmit:

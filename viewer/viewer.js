@@ -107,9 +107,28 @@ function hideOverlay() {
 
 function configureViewerMode() {
   const showCompactResetButton = minimalMode || workflowMode;
+
+  // ── Embed mode: hide all UI for card thumbnails ──
   if (embeddedMode) {
+    document.body.classList.add('embed');
     document.body.classList.add('embedded-viewer');
+    calibrateButton.hidden = true;
+    calibrationRotateButton.hidden = true;
+    calibrationTranslateButton.hidden = true;
+    saveCalibrationButton.hidden = true;
+    cancelCalibrationButton.hidden = true;
+    setInitialViewButton.hidden = true;
+    confirmInitialViewButton.hidden = true;
+    cancelInitialViewButton.hidden = true;
+    animationToggleButton.hidden = true;
+    resetButton.hidden = true;
+    hintLabel.hidden = true;
+    minimalResetButton.hidden = true;
+    animationPanel.hidden = true;
+    overlay.classList.add('hidden');
+    return;
   }
+
   if (minimalMode) {
     document.body.classList.add('minimal-viewer');
   }
@@ -651,7 +670,9 @@ const app = new Application(canvas, {
   },
 });
 
-app.graphicsDevice.maxPixelRatio = Math.min(window.devicePixelRatio || 1, MAX_DEVICE_PIXEL_RATIO);
+app.graphicsDevice.maxPixelRatio = embeddedMode
+  ? 1.0
+  : Math.min(window.devicePixelRatio || 1, MAX_DEVICE_PIXEL_RATIO);
 app.setCanvasFillMode(FILLMODE_FILL_WINDOW);
 app.setCanvasResolution(RESOLUTION_AUTO);
 app.scene.ambientLight = new Color(0.82, 0.82, 0.82);
@@ -659,7 +680,9 @@ app.start();
 const viewerLayers = createViewerLayers(app);
 
 window.addEventListener('resize', () => {
-  app.graphicsDevice.maxPixelRatio = Math.min(window.devicePixelRatio || 1, MAX_DEVICE_PIXEL_RATIO);
+  app.graphicsDevice.maxPixelRatio = embeddedMode
+    ? 1.0
+    : Math.min(window.devicePixelRatio || 1, MAX_DEVICE_PIXEL_RATIO);
   app.resizeCanvas();
 });
 

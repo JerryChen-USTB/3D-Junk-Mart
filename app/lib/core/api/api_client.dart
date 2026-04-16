@@ -3,13 +3,28 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 class ApiClient {
-  ApiClient({
-    http.Client? httpClient,
-    this.baseUrl = 'http://222.199.216.192:8000/api/v1',
-  }) : _httpClient = httpClient ?? http.Client();
+  ApiClient({http.Client? httpClient, String? baseUrl})
+    : _httpClient = httpClient ?? http.Client(),
+      baseUrl = _normalizeBaseUrl(baseUrl ?? _configuredBaseUrl);
 
   final http.Client _httpClient;
   final String baseUrl;
+
+  static const String _configuredBaseUrl = String.fromEnvironment(
+    'API_BASE_URL',
+    defaultValue: 'http://127.0.0.1:8000',
+  );
+
+  static String _normalizeBaseUrl(String rawBaseUrl) {
+    final trimmed = rawBaseUrl.trim().replaceFirst(RegExp(r'/+$'), '');
+    if (trimmed.endsWith('/api/v1')) {
+      return trimmed;
+    }
+    if (trimmed.endsWith('/api')) {
+      return '$trimmed/v1';
+    }
+    return '$trimmed/api/v1';
+  }
 
   Uri _uri(String path, [Map<String, dynamic>? queryParameters]) {
     final normalizedPath = path.startsWith('/') ? path : '/$path';
@@ -69,6 +84,22 @@ class ApiClient {
     String? bearerToken,
   }) async {
     final response = await _httpClient.patch(
+      _uri(path),
+      headers: _headers(bearerToken),
+      body: body == null ? null : jsonEncode(body),
+    );
+    return _decodeEnvelope<Map<String, dynamic>>(
+      response,
+      (value) => value is Map<String, dynamic> ? value : <String, dynamic>{},
+    );
+  }
+
+  Future<ApiEnvelope<Map<String, dynamic>>> putJson(
+    String path, {
+    Object? body,
+    String? bearerToken,
+  }) async {
+    final response = await _httpClient.put(
       _uri(path),
       headers: _headers(bearerToken),
       body: body == null ? null : jsonEncode(body),
