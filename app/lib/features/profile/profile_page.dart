@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/listings/listing_models.dart';
 import '../../core/listings/listings_repository.dart';
+import '../../core/session/app_session.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/editorial_widgets.dart';
 import '../listings/listing_card.dart';
@@ -11,6 +12,7 @@ import '../listings/listing_card.dart';
 class ProfilePage extends StatefulWidget {
   const ProfilePage({
     super.key,
+    required this.session,
     required this.onOpenOrder,
     required this.onOpenReview,
     required this.onOpenSuccess,
@@ -20,6 +22,7 @@ class ProfilePage extends StatefulWidget {
     this.onOpenListing,
   });
 
+  final AppSession session;
   final VoidCallback onOpenOrder;
   final VoidCallback onOpenReview;
   final VoidCallback onOpenSuccess;
@@ -54,6 +57,51 @@ class _ProfilePageState extends State<ProfilePage> {
       _myListingsFuture = future;
     });
     await future;
+  }
+
+  // --- Helpers to read session data ---
+
+  String get _displayName =>
+      widget.session.profile?['display_name']?.toString() ??
+      widget.session.user['display_name']?.toString() ??
+      '用户';
+
+  String get _bio =>
+      widget.session.profile?['bio']?.toString() ??
+      widget.session.user['bio']?.toString() ??
+      '';
+
+  String get _sesameLabel {
+    final score =
+        (widget.session.profile?['sesame_credit_score'] as num?)?.toInt() ??
+        (widget.session.user['sesame_credit_score'] as num?)?.toInt() ??
+        0;
+    if (score >= 700) return '信用: 极好';
+    if (score >= 650) return '信用: 优秀';
+    if (score >= 600) return '信用: 良好';
+    if (score >= 550) return '信用: 中等';
+    if (score >   0) return '信用: 较差';
+    return '信用: 未评估';
+  }
+
+  String _formatCount(Object? raw) {
+    final n = (raw as num?)?.toInt() ?? 0;
+    if (n >= 10000) return '${(n / 10000).toStringAsFixed(1)}w';
+    if (n >= 1000) return '${(n / 1000).toStringAsFixed(1)}k';
+    return n.toString();
+  }
+
+  String get _followingCount =>
+      _formatCount(widget.session.user['following_count']);
+
+  String get _followerCount =>
+      _formatCount(widget.session.user['follower_count']);
+
+  String get _positiveRate {
+    final raw = widget.session.user['positive_rate'];
+    if (raw == null) return '-';
+    final pct = (raw as num).toDouble();
+    return '${pct.toStringAsFixed(0)}%';
   }
 
   @override
@@ -101,8 +149,8 @@ class _ProfilePageState extends State<ProfilePage> {
                     width: 100,
                     height: 100,
                     child: EditorialImagePlaceholder(
-                      label: 'Julian Thorne',
-                      subtitle: 'Collector profile',
+                      label: _displayName,
+                      subtitle: _bio.isNotEmpty ? _bio : 'Profile',
                       badge: 'My page',
                       height: 100,
                       borderRadius: 28,
@@ -115,20 +163,22 @@ class _ProfilePageState extends State<ProfilePage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Julian Thorne',
+                          _displayName,
                           style: Theme.of(context).textTheme.headlineSmall,
                         ),
-                        const SizedBox(height: 6),
-                        Text(
-                          'Collector, seller, and weekend curator',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
+                        if (_bio.isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            _bio,
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ],
                         const SizedBox(height: 10),
                         FittedBox(
                           fit: BoxFit.scaleDown,
                           alignment: Alignment.centerLeft,
                           child: EditorialPill(
-                            label: 'Sesame: excellent',
+                            label: _sesameLabel,
                             backgroundColor: const Color(0xFFE0F7F7),
                             foregroundColor: AppColors.mint,
                           ),
@@ -137,10 +187,10 @@ class _ProfilePageState extends State<ProfilePage> {
                         Wrap(
                           spacing: 20,
                           runSpacing: 12,
-                          children: const [
-                            _ProfileMetric(value: '128', label: 'Following'),
-                            _ProfileMetric(value: '2.4k', label: 'Followers'),
-                            _ProfileMetric(value: '98%', label: 'Positive'),
+                          children: [
+                            _ProfileMetric(value: _followingCount, label: 'Following'),
+                            _ProfileMetric(value: _followerCount, label: 'Followers'),
+                            _ProfileMetric(value: _positiveRate, label: 'Positive'),
                           ],
                         ),
                       ],

@@ -100,6 +100,7 @@ class _AppShellState extends State<AppShell> {
       MessagesPage(onOpenChat: () => _openPage(buildChatDetailDemoPage)),
       ProfilePage(
         key: ValueKey('profile-$_marketplaceVersion'),
+        session: widget.session,
         onOpenOrder: () => _openPage(buildOrderDetailDemoPage),
         onOpenReview: () => _openPage(buildReviewDemoPage),
         onOpenSuccess: () => _openPage(buildPaymentSuccessDemoPage),
