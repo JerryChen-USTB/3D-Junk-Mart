@@ -1,1379 +1,670 @@
 from __future__ import annotations
 
-import uuid
-from pathlib import Path
-from types import SimpleNamespace
-
 import unittest
 from unittest.mock import patch
 
 import backend.app.routes.reconstructions as reconstructions_module
+from shared.task_store import get_task, update_task
 from tests.backend_test_support import backend_harness
 
 
-AUTH_STATES = ["none", "invalid", "standard", "lower", "spaced", "demo", "fresh", "revoked"]
-
-
-def _assert_success(testcase, response, expected_status: int = 200):
-    testcase.assertEqual(response.status_code, expected_status)
-    payload = response.json()
-    if isinstance(payload, dict) and "code" in payload:
-        testcase.assertEqual(payload["code"], 0)
-        testcase.assertEqual(payload["message"], "ok")
-        testcase.assertIn("meta", payload)
-        testcase.assertIn("request_id", payload["meta"])
-        testcase.assertIsInstance(payload["meta"]["request_id"], str)
-        return payload.get("data"), payload
-    return payload, payload
-
-
-def _assert_error(testcase, response, expected_status: int, expected_code: int):
-    testcase.assertEqual(response.status_code, expected_status)
-    payload = response.json()
-    testcase.assertEqual(payload["code"], expected_code)
-    testcase.assertNotEqual(payload["code"], 0)
-    testcase.assertIn("meta", payload)
-    testcase.assertIn("request_id", payload["meta"])
-    testcase.assertIsInstance(payload["meta"]["request_id"], str)
-    return payload
-
-
-def _headers_for_state(
-    harness,
-    state: str,
-    fresh_token: str,
-    revoked_token: str,
-    *,
-    prefer_fresh_valid: bool = False,
-) -> dict[str, str]:
-    if state == "none":
-        return {}
-    if state == "invalid":
-        return {"Authorization": "Bearer invalid-token"}
-
-    if state == "revoked":
-        token = revoked_token
-    elif state == "fresh":
-        token = fresh_token
-    else:
-        token = harness.demo_access_token
-
-    if state == "lower":
-        return {"authorization": f"bearer {token}"}
-    if state == "spaced":
-        return {"Authorization": f"Bearer    {token}"}
-    if state == "garbage":
-        return {"Authorization": "Token invalid"}
+def _auth_headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def _make_matrix_tokens(harness):
-    fresh_user_id, fresh_token, _ = harness.make_user_session(identifier=f"fresh-{uuid.uuid4().hex[:8]}")
-    _, revoked_token, _ = harness.make_user_session(identifier=f"revoked-{uuid.uuid4().hex[:8]}")
-    harness.store.revoke_session(revoked_token)
-    _, logout_token, logout_refresh = harness.make_user_session(identifier=f"logout-{uuid.uuid4().hex[:8]}")
-    _, refresh_token, refresh_refresh = harness.make_user_session(identifier=f"refresh-{uuid.uuid4().hex[:8]}")
+def _assert_ok(testcase: unittest.TestCase, response, expected_status: int = 200):
+    testcase.assertEqual(response.status_code, expected_status)
+    payload = response.json()
+    testcase.assertEqual(payload["code"], 0)
+    testcase.assertEqual(payload["message"], "ok")
+    testcase.assertIn("meta", payload)
+    testcase.assertIn("request_id", payload["meta"])
+    return payload["data"], payload
+
+
+def _assert_error(
+    testcase: unittest.TestCase,
+    response,
+    *,
+    expected_status: int,
+    expected_code: int,
+) -> dict[str, object]:
+    testcase.assertEqual(response.status_code, expected_status)
+    payload = response.json()
+    testcase.assertEqual(payload["code"], expected_code)
+    testcase.assertIn("meta", payload)
+    testcase.assertIn("request_id", payload["meta"])
+    return payload
+
+
+def _create_marketplace_fixture(harness):
+    seller_id, seller_token, _ = harness.make_user_session(
+        identifier="seller-case",
+        display_name="Seller",
+    )
+    buyer_id, buyer_token, _ = harness.make_user_session(
+        identifier="buyer-case",
+        display_name="Buyer",
+    )
+    listing_id = harness.make_listing(
+        title="Vintage Camera",
+        seller_id=seller_id,
+        preview_ready=True,
+    )
+    address_id = harness.make_address(user_id=buyer_id, is_default=True)
     return {
-        "fresh_user_id": fresh_user_id,
-        "fresh": fresh_token,
-        "revoked": revoked_token,
-        "logout": logout_token,
-        "refresh": refresh_token,
-        "logout_refresh": logout_refresh,
-        "refresh_refresh": refresh_refresh,
+        "seller_id": seller_id,
+        "seller_token": seller_token,
+        "buyer_id": buyer_id,
+        "buyer_token": buyer_token,
+        "listing_id": listing_id,
+        "address_id": address_id,
     }
 
 
+def _create_paid_order(harness, fixture: dict[str, str]) -> str:
+    response = harness.client.post(
+        "/api/v1/orders",
+        headers=_auth_headers(fixture["buyer_token"]),
+        json={
+            "listing_id": fixture["listing_id"],
+            "address_id": fixture["address_id"],
+        },
+    )
+    if response.status_code != 200:
+        raise AssertionError(response.text)
+    payload = response.json()
+    if payload.get("code") != 0:
+        raise AssertionError(payload)
+    data = payload["data"]
+    return str(data["order"]["id"])
+
+
+def _prepare_ready_task(harness, *, task_id: str, seller_id: str) -> None:
+    harness.make_task(
+        task_id=task_id,
+        title="Ready Task",
+        status="ready",
+        model_rel_path=f"/storage/models/{task_id}/model.ply",
+    )
+    model_dir = harness.storage_root / "models" / task_id
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "model.ply").write_bytes(b"ply")
+    update_task(task_id, seller_id=seller_id)
+
+
 class BackendMatrixTestCase(unittest.TestCase):
-    def test_marketplace_public_matrix(self) -> None:
-        families = [
-            "core",
-            "catalog",
-            "pages",
-            "search",
-            "listings",
-            "listing_detail",
-            "users",
-            "auth",
-        ]
+    def test_empty_market_bootstrap_and_guest_session(self) -> None:
+        with backend_harness("empty_market") as harness:
+            health = harness.client.get("/health")
+            self.assertEqual(health.status_code, 200)
+            health_payload = health.json()
+            self.assertEqual(health_payload["seeded_users"], 0)
+            self.assertIsNone(health_payload["demo_user_id"])
 
-        with backend_harness("marketplace_public") as harness:
-            tokens = _make_matrix_tokens(harness)
-            case_count = 0
+            api_health, _ = _assert_ok(self, harness.client.get("/api/v1/health"))
+            self.assertEqual(api_health["seeded_users"], 0)
+            self.assertIsNone(api_health["demo_user_id"])
 
-            for family in families:
-                for state in AUTH_STATES:
-                    for mode in range(8):
-                        case_count += 1
-                        with self.subTest(family=family, state=state, mode=mode):
-                            headers = _headers_for_state(
-                                harness,
-                                state,
-                                tokens["fresh"],
-                                tokens["revoked"],
-                            )
-                            client = harness.client
+            config, _ = _assert_ok(self, harness.client.get("/api/v1/config/public"))
+            self.assertEqual(config["base_currency"], "CNY")
+            self.assertTrue(config["guest_entry_enabled"])
 
-                            if family == "core":
-                                route = mode % 3
-                                if route == 0:
-                                    response = client.get("/health", headers=headers)
-                                    self.assertEqual(response.status_code, 200)
-                                    data = response.json()
-                                    self.assertEqual(data["status"], "ok")
-                                    self.assertGreaterEqual(data["seeded_users"], 3)
-                                elif route == 1:
-                                    data, _ = _assert_success(self, client.get("/api/v1/version", headers=headers))
-                                    self.assertEqual(data["api_version"], "v1")
-                                    self.assertIn("service_name", data)
-                                else:
-                                    data, _ = _assert_success(self, client.get("/api/v1/config/public", headers=headers))
-                                    self.assertEqual(data["base_currency"], "CNY")
-                                    self.assertIsInstance(data["supported_locales"], list)
-                                    self.assertIn("guest_entry_enabled", data)
+            categories, _ = _assert_ok(self, harness.client.get("/api/v1/categories"))
+            self.assertGreaterEqual(len(categories), 1)
 
-                            elif family == "catalog":
-                                route = mode % 3
-                                if route == 0:
-                                    data, _ = _assert_success(self, client.get("/api/v1/categories", headers=headers))
-                                    self.assertIsInstance(data, list)
-                                    self.assertGreaterEqual(len(data), 1)
-                                elif route == 1:
-                                    data, _ = _assert_success(self, client.get("/api/v1/service-catalog", headers=headers))
-                                    self.assertIsInstance(data, list)
-                                    self.assertGreaterEqual(len(data), 1)
-                                else:
-                                    data, _ = _assert_success(self, client.get("/api/v1/banners", headers=headers))
-                                    self.assertIsInstance(data, list)
-                                    self.assertGreaterEqual(len(data), 1)
+            review_tags, _ = _assert_ok(self, harness.client.get("/api/v1/reviews/tags"))
+            self.assertGreaterEqual(len(review_tags), 1)
 
-                            elif family == "pages":
-                                route = mode % 4
-                                if route == 0:
-                                    data, _ = _assert_success(self, client.get("/api/v1/pages/home", headers=headers))
-                                    self.assertEqual(data["page_key"], "home")
-                                    self.assertIn("resources", data)
-                                elif route == 1:
-                                    data, _ = _assert_success(self, client.get("/api/v1/pages/search", headers=headers))
-                                    self.assertEqual(data["page_key"], "search")
-                                    self.assertIn("resources", data)
-                                elif route == 2:
-                                    data, _ = _assert_success(self, client.get("/api/v1/pages/auth/login", headers=headers))
-                                    self.assertEqual(data["page_key"], "auth_login")
-                                else:
-                                    data, _ = _assert_success(self, client.get("/api/v1/pages/auth/register", headers=headers))
-                                    self.assertEqual(data["page_key"], "auth_register")
+            home_page, _ = _assert_ok(self, harness.client.get("/api/v1/pages/home"))
+            self.assertEqual(home_page["page_key"], "home")
 
-                            elif family == "search":
-                                route = mode % 4
-                                if route == 0:
-                                    query = ["", "相机", "3D", "不存在", "  相机  ", "A" * 128, "demo", "二手"]
-                                    data, _ = _assert_success(
-                                        self,
-                                        client.get("/api/v1/search/suggestions", params={"query": query[mode]}, headers=headers),
-                                    )
-                                    self.assertEqual(data["query"], query[mode])
-                                    self.assertIsInstance(data["suggestions"], list)
-                                elif route == 1:
-                                    data, _ = _assert_success(self, client.get("/api/v1/search/facets", headers=headers))
-                                    self.assertIn("categories", data)
-                                    self.assertIn("price_buckets", data)
-                                elif route == 2:
-                                    data, _ = _assert_success(
-                                        self,
-                                        client.get("/api/v1/search/suggestions", params={"query": "相机"}, headers=headers),
-                                    )
-                                    self.assertTrue(data["suggestions"])
-                                else:
-                                    data, _ = _assert_success(
-                                        self,
-                                        client.get("/api/v1/search/suggestions", params={"query": ""}, headers=headers),
-                                    )
-                                    self.assertIsInstance(data["recent_queries"], list)
+            home_feed, home_feed_payload = _assert_ok(
+                self,
+                harness.client.get("/api/v1/home/feed"),
+            )
+            self.assertEqual(home_feed, [])
+            self.assertEqual(home_feed_payload["meta"]["page"]["total"], 0)
 
-                            elif family == "listings":
-                                route = mode % 4
-                                if route == 0:
-                                    data, payload = _assert_success(
-                                        self,
-                                        client.get("/api/v1/listings", params={"page": 1, "page_size": 20}, headers=headers),
-                                    )
-                                    self.assertIsInstance(data, list)
-                                    self.assertIn("page", payload["meta"])
-                                elif route == 1:
-                                    data, _ = _assert_success(
-                                        self,
-                                        client.get("/api/v1/listings", params={"status": "live", "page_size": 1}, headers=headers),
-                                    )
-                                    self.assertLessEqual(len(data), 1)
-                                elif route == 2:
-                                    data, _ = _assert_success(
-                                        self,
-                                        client.get("/api/v1/categories/cat_home/listings", params={"page_size": 100}, headers=headers),
-                                    )
-                                    self.assertIsInstance(data, list)
-                                else:
-                                    response = client.get("/api/v1/listings", params={"page_size": 0}, headers=headers)
-                                    _assert_error(self, response, 422, 2001)
+            guest_session, _ = _assert_ok(self, harness.client.get("/api/v1/auth/session"))
+            self.assertEqual(guest_session["user"]["id"], "guest")
+            self.assertTrue(guest_session["session"]["guest_mode"])
+            self.assertEqual(guest_session["session"]["access_token"], "")
 
-                            elif family == "listing_detail":
-                                valid_listing_id = harness.demo_listing_id
-                                missing_listing_id = f"listing_missing_{mode}"
-                                route = mode % 6
-                                if route == 0:
-                                    data, _ = _assert_success(self, client.get(f"/api/v1/pages/listings/{valid_listing_id}", headers=headers))
-                                    self.assertEqual(data["page_key"], "listing_detail")
-                                    self.assertIn("preview_3d", data["resources"])
-                                elif route == 1:
-                                    data, _ = _assert_success(self, client.get(f"/api/v1/listings/{valid_listing_id}", headers=headers))
-                                    self.assertEqual(data["listing"]["id"], valid_listing_id)
-                                    self.assertIn("preview_3d", data)
-                                elif route == 2:
-                                    data, _ = _assert_success(self, client.get(f"/api/v1/listings/{valid_listing_id}/media", headers=headers))
-                                    self.assertIsInstance(data, list)
-                                elif route == 3:
-                                    data, _ = _assert_success(self, client.get(f"/api/v1/listings/{valid_listing_id}/seller", headers=headers))
-                                    self.assertEqual(data["id"], harness.demo_seller_id)
-                                elif route == 4:
-                                    data, _ = _assert_success(self, client.get(f"/api/v1/listings/{valid_listing_id}/specs", headers=headers))
-                                    self.assertIsInstance(data, list)
-                                else:
-                                    response = client.get(f"/api/v1/listings/{missing_listing_id}", headers=headers)
-                                    _assert_error(self, response, 404, 3004)
+            invalid_session, _ = _assert_ok(
+                self,
+                harness.client.get(
+                    "/api/v1/auth/session",
+                    headers=_auth_headers("invalid-token"),
+                ),
+            )
+            self.assertEqual(invalid_session["user"]["id"], "guest")
+            self.assertTrue(invalid_session["session"]["guest_mode"])
 
-                            elif family == "users":
-                                valid_user_id = harness.demo_buyer_id if mode % 2 == 0 else harness.demo_seller_id
-                                missing_user_id = f"user_missing_{mode}"
-                                route = mode % 4
-                                if route == 0:
-                                    data, _ = _assert_success(self, client.get(f"/api/v1/users/{valid_user_id}", headers=headers))
-                                    self.assertEqual(data["id"], valid_user_id)
-                                elif route == 1:
-                                    response = client.get(f"/api/v1/users/{missing_user_id}", headers=headers)
-                                    _assert_error(self, response, 404, 3004)
-                                elif route == 2:
-                                    data, _ = _assert_success(self, client.get(f"/api/v1/users/{valid_user_id}/followers", headers=headers))
-                                    self.assertIsInstance(data, list)
-                                else:
-                                    data, _ = _assert_success(self, client.get(f"/api/v1/users/{valid_user_id}/following", headers=headers))
-                                    self.assertIsInstance(data, list)
+            listings, _ = _assert_ok(self, harness.client.get("/api/v1/listings"))
+            self.assertEqual(listings, [])
 
-                            else:
-                                route = mode % 8
-                                if route == 0:
-                                    data, _ = _assert_success(self, client.get("/api/v1/auth/session", headers=headers))
-                                    self.assertIn("user", data)
-                                    if state == "fresh":
-                                        self.assertEqual(data["user"]["id"], tokens["fresh_user_id"])
-                                    else:
-                                        self.assertEqual(data["user"]["id"], harness.demo_buyer_id)
-                                elif route == 1:
-                                    data, _ = _assert_success(
-                                        self,
-                                        client.post(
-                                            "/api/v1/auth/login",
-                                            json={"identifier": "demo-buyer", "password": "demo12345", "device_name": "Matrix"},
-                                            headers=headers,
-                                        ),
-                                    )
-                                    self.assertIn("session", data)
-                                elif route == 2:
-                                    response = client.post(
-                                        "/api/v1/auth/login",
-                                        json={"identifier": "demo-buyer", "password": "wrong-password"},
-                                        headers=headers,
-                                    )
-                                    _assert_error(self, response, 401, 1001)
-                                elif route == 3:
-                                    identifier = f"register-{mode}-{state}-{uuid.uuid4().hex[:8]}"
-                                    data, _ = _assert_success(
-                                        self,
-                                        client.post(
-                                            "/api/v1/auth/register",
-                                            json={
-                                                "display_name": f"Matrix {mode}",
-                                                "identifier": identifier,
-                                                "password": "MatrixPass123!",
-                                                "consent_version": "v1",
-                                            },
-                                            headers=headers,
-                                        ),
-                                    )
-                                    self.assertIn("session", data)
-                                elif route == 4:
-                                    identifier = f"register-duplicate-{mode}-{uuid.uuid4().hex[:8]}"
-                                    first = client.post(
-                                        "/api/v1/auth/register",
-                                        json={
-                                            "display_name": f"Matrix Duplicate {mode}",
-                                            "identifier": identifier,
-                                            "password": "MatrixPass123!",
-                                            "consent_version": "v1",
-                                        },
-                                        headers=headers,
-                                    )
-                                    _assert_success(self, first)
-                                    response = client.post(
-                                        "/api/v1/auth/register",
-                                        json={
-                                            "display_name": f"Matrix Duplicate {mode}",
-                                            "identifier": identifier,
-                                            "password": "MatrixPass123!",
-                                            "consent_version": "v1",
-                                        },
-                                        headers=headers,
-                                    )
-                                    _assert_error(self, response, 409, 3002)
-                                elif route == 5:
-                                    _, refresh_access, refresh_refresh = harness.make_user_session(
-                                        identifier=f"refresh-case-{mode}-{state}-{uuid.uuid4().hex[:8]}"
-                                    )
-                                    data, _ = _assert_success(
-                                        self,
-                                        client.post(
-                                            "/api/v1/auth/refresh",
-                                            json={"refresh_token": refresh_refresh},
-                                            headers=headers,
-                                        ),
-                                    )
-                                    self.assertIn("session", data)
-                                elif route == 6:
-                                    response = client.post(
-                                        "/api/v1/auth/refresh",
-                                        json={"refresh_token": f"refresh-missing-{mode}"},
-                                        headers=headers,
-                                    )
-                                    _assert_error(self, response, 401, 1001)
-                                else:
-                                    _, logout_access, _ = harness.make_user_session(
-                                        identifier=f"logout-case-{mode}-{state}-{uuid.uuid4().hex[:8]}"
-                                    )
-                                    data, _ = _assert_success(
-                                        self,
-                                        client.post(
-                                            "/api/v1/auth/logout",
-                                            json={"access_token": logout_access},
-                                            headers=headers,
-                                        ),
-                                    )
-                                    self.assertTrue(data["revoked"])
+    def test_register_logout_and_guest_fallback(self) -> None:
+        with backend_harness("auth_flow") as harness:
+            register, _ = _assert_ok(
+                self,
+                harness.client.post(
+                    "/api/v1/auth/register",
+                    json={
+                        "display_name": "Matrix User",
+                        "identifier": "matrix-user",
+                        "password": "MatrixPass123!",
+                        "consent_version": "v1",
+                    },
+                ),
+            )
+            access_token = str(register["session"]["access_token"])
 
-            self.assertEqual(case_count, 512)
+            session, _ = _assert_ok(
+                self,
+                harness.client.get(
+                    "/api/v1/auth/session",
+                    headers=_auth_headers(access_token),
+                ),
+            )
+            self.assertEqual(session["user"]["display_name"], "Matrix User")
+            self.assertIsNot(session["session"].get("guest_mode"), True)
 
-    def test_marketplace_private_matrix(self) -> None:
-        families = [
-            "profile",
-            "addresses",
-            "uploads",
-            "wallet_membership",
-            "notifications",
-            "listings_and_drafts",
-            "conversations",
-            "orders",
-        ]
+            _assert_ok(
+                self,
+                harness.client.post(
+                    "/api/v1/auth/logout",
+                    headers=_auth_headers(access_token),
+                ),
+            )
 
-        with backend_harness("marketplace_private") as harness:
-            tokens = _make_matrix_tokens(harness)
-            fresh_user_id = tokens["fresh_user_id"]
-            case_count = 0
+            fallback_session, _ = _assert_ok(
+                self,
+                harness.client.get(
+                    "/api/v1/auth/session",
+                    headers=_auth_headers(access_token),
+                ),
+            )
+            self.assertEqual(fallback_session["user"]["id"], "guest")
+            self.assertTrue(fallback_session["session"]["guest_mode"])
 
-            for family in families:
-                for state in AUTH_STATES:
-                    for mode in range(8):
-                        case_count += 1
-                        with self.subTest(family=family, state=state, mode=mode):
-                            prefer_fresh_valid = mode in {1, 2, 4, 5, 6, 7}
-                            headers = _headers_for_state(
-                                harness,
-                                state,
-                                tokens["fresh"],
-                                tokens["revoked"],
-                                prefer_fresh_valid=prefer_fresh_valid,
-                            )
-                            client = harness.client
-                            valid_state = state not in {"none", "invalid", "revoked", "garbage"}
+    def test_conversation_flow_and_page_bootstrap(self) -> None:
+        with backend_harness("conversation_flow") as harness:
+            fixture = _create_marketplace_fixture(harness)
 
-                            if not valid_state:
-                                if family == "uploads" and mode in {0, 1, 2, 6, 7}:
-                                    response = client.post(
-                                        "/api/v1/uploads/presign",
-                                        json={"filename": "clip.mp4", "kind": "image"},
-                                        headers=headers,
-                                    )
-                                elif family == "profile" and mode in {1, 2}:
-                                    response = client.patch(
-                                        "/api/v1/users/me",
-                                        json={"display_name": "Denied", "profile_visibility": "public"},
-                                        headers=headers,
-                                    )
-                                elif family == "addresses" and mode in {1, 2, 3, 4, 5, 6, 7}:
-                                    response = client.post(
-                                        "/api/v1/users/me/addresses",
-                                        json={
-                                            "recipient_name": "Denied",
-                                            "phone": "13800000000",
-                                            "region_code": "310000",
-                                            "address_line1": "Denied",
-                                        },
-                                        headers=headers,
-                                    )
-                                elif family == "wallet_membership":
-                                    response = client.get("/api/v1/wallet", headers=headers)
-                                else:
-                                    response = client.get("/api/v1/users/me", headers=headers)
-                                _assert_error(self, response, 401, 1001)
-                                continue
+            _assert_error(
+                self,
+                harness.client.post(
+                    "/api/v1/conversations",
+                    json={"listing_id": fixture["listing_id"]},
+                ),
+                expected_status=401,
+                expected_code=1001,
+            )
 
-                            current_user_id = fresh_user_id if state == "fresh" else harness.demo_buyer_id
+            conversation_detail, _ = _assert_ok(
+                self,
+                harness.client.post(
+                    "/api/v1/conversations",
+                    headers=_auth_headers(fixture["buyer_token"]),
+                    json={
+                        "listing_id": fixture["listing_id"],
+                        "content_text": "Is this still available?",
+                    },
+                ),
+            )
+            conversation_id = str(conversation_detail["conversation"]["id"])
+            self.assertEqual(len(conversation_detail["messages"]), 1)
 
-                            if family == "profile":
-                                route = mode % 8
-                                if route == 0:
-                                    data, _ = _assert_success(self, client.get("/api/v1/users/me", headers=headers))
-                                    self.assertEqual(data["id"], current_user_id)
-                                elif route == 1:
-                                    data, _ = _assert_success(
-                                        self,
-                                        client.patch(
-                                            "/api/v1/users/me",
-                                            json={
-                                                "display_name": f"Profile {mode}",
-                                                "location": "Matrix City",
-                                                "profile_visibility": "friends",
-                                            },
-                                            headers=headers,
-                                        ),
-                                    )
-                                    self.assertEqual(data["profile_visibility"], "friends")
-                                elif route == 2:
-                                    response = client.patch(
-                                        "/api/v1/users/me",
-                                        json={"display_name": "Broken", "profile_visibility": "invalid"},
-                                        headers=headers,
-                                    )
-                                    _assert_error(self, response, 422, 2001)
-                                elif route == 3:
-                                    data, _ = _assert_success(self, client.get("/api/v1/users/me/stats", headers=headers))
-                                    self.assertIn("posts_count", data)
-                                elif route == 4:
-                                    data, _ = _assert_success(self, client.get("/api/v1/pages/me", headers=headers))
-                                    self.assertEqual(data["page_key"], "me")
-                                elif route == 5:
-                                    data, _ = _assert_success(self, client.get("/api/v1/pages/me/settings", headers=headers))
-                                    self.assertEqual(data["page_key"], "me_settings")
-                                elif route == 6:
-                                    data, payload = _assert_success(self, client.get("/api/v1/users/me/listings", params={"page": 1, "page_size": 1}, headers=headers))
-                                    self.assertIsInstance(data, list)
-                                    self.assertEqual(payload["meta"]["page"]["page_size"], 1)
-                                else:
-                                    response = client.get("/api/v1/users/me/favorites", params={"page_size": 0}, headers=headers)
-                                    _assert_error(self, response, 422, 2001)
+            conversation_page, _ = _assert_ok(
+                self,
+                harness.client.get(
+                    f"/api/v1/pages/conversations/{conversation_id}",
+                    headers=_auth_headers(fixture["buyer_token"]),
+                ),
+            )
+            self.assertEqual(conversation_page["page_key"], "conversation_detail")
 
-                            elif family == "addresses":
-                                user_id = current_user_id
-                                route = mode % 8
-                                address_id = harness.make_address(user_id=user_id, is_default=route in {1, 3})
-                                if route == 0:
-                                    data, _ = _assert_success(self, client.get("/api/v1/users/me/addresses", headers=headers))
-                                    self.assertIsInstance(data, list)
-                                elif route == 1:
-                                    data, _ = _assert_success(
-                                        self,
-                                        client.post(
-                                            "/api/v1/users/me/addresses",
-                                            json={
-                                                "recipient_name": f"Receiver {mode}",
-                                                "phone": "13800000000",
-                                                "region_code": "310000",
-                                                "address_line1": "Matrix Road 1",
-                                                "address_line2": "Room 101",
-                                                "is_default": True,
-                                            },
-                                            headers=headers,
-                                        ),
-                                    )
-                                    self.assertEqual(data["recipient_name"], f"Receiver {mode}")
-                                elif route == 2:
-                                    data, _ = _assert_success(self, client.get(f"/api/v1/users/me/addresses/{address_id}", headers=headers))
-                                    self.assertEqual(data["id"], address_id)
-                                elif route == 3:
-                                    data, _ = _assert_success(
-                                        self,
-                                        client.patch(
-                                            f"/api/v1/users/me/addresses/{address_id}",
-                                            json={"recipient_name": f"Updated {mode}", "is_default": True},
-                                            headers=headers,
-                                        ),
-                                    )
-                                    self.assertEqual(data["recipient_name"], f"Updated {mode}")
-                                elif route == 4:
-                                    data, _ = _assert_success(self, client.delete(f"/api/v1/users/me/addresses/{address_id}", headers=headers))
-                                    self.assertTrue(data["deleted"])
-                                elif route == 5:
-                                    client.delete(f"/api/v1/users/me/addresses/{address_id}", headers=headers)
-                                    response = client.get(f"/api/v1/users/me/addresses/{address_id}", headers=headers)
-                                    _assert_error(self, response, 404, 3004)
-                                elif route == 6:
-                                    response = client.post(
-                                        "/api/v1/users/me/addresses",
-                                        json={"recipient_name": "Broken"},
-                                        headers=headers,
-                                    )
-                                    _assert_error(self, response, 422, 2001)
-                                else:
-                                    response = client.patch(
-                                        "/api/v1/users/me/addresses/address_missing",
-                                        json={"recipient_name": "Missing"},
-                                        headers=headers,
-                                    )
-                                    _assert_error(self, response, 404, 3004)
+            seller_messages, _ = _assert_ok(
+                self,
+                harness.client.get(
+                    f"/api/v1/conversations/{conversation_id}/messages",
+                    headers=_auth_headers(fixture["seller_token"]),
+                ),
+            )
+            self.assertEqual(len(seller_messages), 1)
+            self.assertEqual(seller_messages[0]["content_text"], "Is this still available?")
 
-                            elif family == "uploads":
-                                route = mode % 4
-                                payload = {"filename": f"clip-{mode}.mp4", "kind": "image"}
-                                if route == 0:
-                                    data, _ = _assert_success(self, client.post("/api/v1/uploads/presign", json=payload, headers=headers))
-                                    self.assertIn("upload_url", data)
-                                elif route == 1:
-                                    data, _ = _assert_success(self, client.post("/api/v1/uploads/presign", json={"filename": "clip.mp4", "kind": "video"}, headers=headers))
-                                    self.assertEqual(data["method"], "PUT")
-                                    self.assertIn("public_url", data)
-                                elif route == 2:
-                                    response = client.post("/api/v1/uploads/presign", json={"filename": "clip.mp4", "kind": "unknown"}, headers=headers)
-                                    _assert_error(self, response, 422, 2001)
-                                else:
-                                    data, _ = _assert_success(self, client.post("/api/v1/uploads/presign", json={"filename": "x" * 64, "kind": "document"}, headers=headers))
-                                    self.assertTrue(data["upload_url"].startswith("/storage/uploads/"))
+            reply, _ = _assert_ok(
+                self,
+                harness.client.post(
+                    f"/api/v1/conversations/{conversation_id}/messages",
+                    headers=_auth_headers(fixture["seller_token"]),
+                    json={"message_type": "text", "content_text": "Yes, it is."},
+                ),
+            )
+            self.assertEqual(reply["content_text"], "Yes, it is.")
 
-                            elif family == "wallet_membership":
-                                route = mode % 8
-                                if route == 0:
-                                    data, _ = _assert_success(self, client.get("/api/v1/wallet", headers=headers))
-                                    self.assertIn("account", data)
-                                    self.assertIn("transactions", data)
-                                elif route == 1:
-                                    data, _ = _assert_success(self, client.get("/api/v1/wallet/transactions", headers=headers))
-                                    self.assertIsInstance(data, list)
-                                elif route == 2:
-                                    data, _ = _assert_success(self, client.get("/api/v1/membership/plans", headers=headers))
-                                    self.assertIsInstance(data, list)
-                                elif route == 3:
-                                    data, _ = _assert_success(self, client.get("/api/v1/membership/subscription", headers=headers))
-                                    self.assertTrue(data is None or "plan" in data)
-                                elif route == 4:
-                                    data, _ = _assert_success(self, client.post("/api/v1/membership/upgrade", json={"plan_key": "gold"}, headers=headers))
-                                    self.assertEqual(data["status"], "active")
-                                elif route == 5:
-                                    response = client.post("/api/v1/membership/upgrade", json={"plan_key": "missing-plan"}, headers=headers)
-                                    _assert_error(self, response, 404, 3004)
-                                elif route == 6:
-                                    data, _ = _assert_success(self, client.get("/api/v1/wallet", headers=headers))
-                                    self.assertIn("account", data)
-                                else:
-                                    data, _ = _assert_success(self, client.get("/api/v1/membership/subscription", headers=headers))
-                                    self.assertTrue(data is None or "plan" in data)
+            buyer_conversations, _ = _assert_ok(
+                self,
+                harness.client.get(
+                    "/api/v1/conversations",
+                    headers=_auth_headers(fixture["buyer_token"]),
+                ),
+            )
+            self.assertEqual(len(buyer_conversations), 1)
+            self.assertEqual(buyer_conversations[0]["last_message_preview"], "Yes, it is.")
+            self.assertEqual(buyer_conversations[0]["unread_count"], 1)
 
-                            elif family == "notifications":
-                                route = mode % 8
-                                if route == 0:
-                                    data, _ = _assert_success(self, client.get("/api/v1/notifications", headers=headers))
-                                    self.assertIsInstance(data, list)
-                                elif route == 1:
-                                    data, _ = _assert_success(self, client.get("/api/v1/badges/summary", headers=headers))
-                                    self.assertIn("unread_notifications", data)
-                                elif route == 2:
-                                    data, _ = _assert_success(self, client.get("/api/v1/notifications/badge", headers=headers))
-                                    self.assertIn("draft_listings", data)
-                                elif route == 3:
-                                    data, _ = _assert_success(
-                                        self,
-                                        client.post("/api/v1/notifications/read", json={"read_at": None}, headers=headers),
-                                    )
-                                    self.assertIn("read_count", data)
-                                elif route == 4:
-                                    notification_id = f"notification_{uuid.uuid4().hex[:10]}"
-                                    harness.store.upsert_record(
-                                        "notification",
-                                        notification_id,
-                                        {
-                                            "id": notification_id,
-                                            "user_id": current_user_id,
-                                            "notification_type": "system",
-                                            "title": f"Notice {mode}",
-                                            "body": "Matrix notification",
-                                            "entity_type": "order",
-                                            "entity_id": harness.demo_order_id,
-                                            "read_at": None,
-                                            "created_at": "2026-04-10T00:00:00Z",
-                                        },
-                                    )
-                                    data, _ = _assert_success(
-                                        self,
-                                        client.patch(f"/api/v1/notifications/{notification_id}/read", json={}, headers=headers),
-                                    )
-                                    self.assertEqual(data["id"], notification_id)
-                                elif route == 5:
-                                    response = client.patch("/api/v1/notifications/notification_missing/read", json={}, headers=headers)
-                                    _assert_error(self, response, 404, 3004)
-                                elif route == 6:
-                                    data, _ = _assert_success(self, client.post("/api/v1/notifications/read", json={"read_at": "2024-01-01T00:00:00Z"}, headers=headers))
-                                    self.assertIn("read_at", data)
-                                else:
-                                    response = client.get("/api/v1/notifications", params={"page_size": 0}, headers=headers)
-                                    _assert_error(self, response, 422, 2001)
+            read_result, _ = _assert_ok(
+                self,
+                harness.client.post(
+                    f"/api/v1/conversations/{conversation_id}/read",
+                    headers=_auth_headers(fixture["buyer_token"]),
+                    json={},
+                ),
+            )
+            self.assertEqual(read_result["conversation_id"], conversation_id)
 
-                            elif family == "listings_and_drafts":
-                                route = mode % 8
-                                listing_id = harness.demo_listing_id if route in {0, 1} else harness.make_listing(title=f"Matrix listing {mode}", seller_id=current_user_id)
-                                if route == 0:
-                                    data, _ = _assert_success(self, client.post(f"/api/v1/listings/{listing_id}/favorite", headers=headers))
-                                    self.assertTrue(data["favorite"])
-                                elif route == 1:
-                                    data, _ = _assert_success(self, client.delete(f"/api/v1/listings/{listing_id}/favorite", headers=headers))
-                                    self.assertFalse(data["favorite"])
-                                elif route == 2:
-                                    draft_response = client.post(
-                                        "/api/v1/listings/drafts",
-                                        json={
-                                            "title": f"Draft {mode}",
-                                            "subtitle": "Draft subtitle",
-                                            "description": "Draft description",
-                                            "category_id": "cat_home",
-                                            "price_minor": 19900,
-                                            "original_price_minor": 29900,
-                                            "currency": "CNY",
-                                            "condition_level": "good",
-                                            "location_city": "Test City",
-                                            "draft_payload_json": {"mode": mode},
-                                        },
-                                        headers=headers,
-                                    )
-                                    data, _ = _assert_success(self, draft_response)
-                                    self.assertEqual(data["status"], "draft")
-                                elif route == 3:
-                                    draft_response = client.post(
-                                        "/api/v1/listings/drafts",
-                                        json={
-                                            "title": f"Draft {mode}",
-                                            "description": "Draft description",
-                                            "category_id": "cat_home",
-                                            "price_minor": 19900,
-                                        },
-                                        headers=headers,
-                                    )
-                                    draft_payload, _ = _assert_success(self, draft_response)
-                                    draft_id = draft_payload["id"]
-                                    data, _ = _assert_success(self, client.get(f"/api/v1/listings/drafts/{draft_id}", headers=headers))
-                                    self.assertEqual(data["id"], draft_id)
-                                elif route == 4:
-                                    draft_response = client.post(
-                                        "/api/v1/listings/drafts",
-                                        json={"title": f"Draft {mode}", "price_minor": 19900},
-                                        headers=headers,
-                                    )
-                                    draft_payload, _ = _assert_success(self, draft_response)
-                                    draft_id = draft_payload["id"]
-                                    data, _ = _assert_success(
-                                        self,
-                                        client.patch(
-                                            f"/api/v1/listings/drafts/{draft_id}",
-                                            json={"title": f"Updated Draft {mode}", "location_city": "Updated City"},
-                                            headers=headers,
-                                        ),
-                                    )
-                                    self.assertEqual(data["title"], f"Updated Draft {mode}")
-                                elif route == 5:
-                                    draft_response = client.post(
-                                        "/api/v1/listings/drafts",
-                                        json={"title": f"Publish Draft {mode}", "price_minor": 19900},
-                                        headers=headers,
-                                    )
-                                    draft_payload, _ = _assert_success(self, draft_response)
-                                    data, _ = _assert_success(self, client.post(f"/api/v1/listings/drafts/{draft_payload['id']}/publish", headers=headers))
-                                    self.assertEqual(data["status"], "live")
-                                elif route == 6:
-                                    response = client.get("/api/v1/listings/drafts/draft_missing", headers=headers)
-                                    _assert_error(self, response, 404, 3004)
-                                else:
-                                    response = client.post(
-                                        "/api/v1/listings/drafts",
-                                        json={"title": 123, "price_minor": "broken"},
-                                        headers=headers,
-                                    )
-                                    _assert_error(self, response, 422, 2001)
+    def test_order_cancel_restores_listing_state(self) -> None:
+        with backend_harness("order_cancel") as harness:
+            fixture = _create_marketplace_fixture(harness)
 
-                            elif family == "conversations":
-                                route = mode % 8
-                                if state == "fresh":
-                                    conversation_id = harness.make_conversation(buyer_id=current_user_id, seller_id=harness.demo_seller_id, listing_id=harness.demo_listing_id)
-                                else:
-                                    conversation_id = harness.demo_conversation_id
-                                if route == 0:
-                                    data, _ = _assert_success(self, client.get("/api/v1/conversations", headers=headers))
-                                    self.assertIsInstance(data, list)
-                                elif route == 1:
-                                    data, _ = _assert_success(self, client.get(f"/api/v1/conversations/{conversation_id}", headers=headers))
-                                    self.assertEqual(data["conversation"]["id"], conversation_id)
-                                elif route == 2:
-                                    data, _ = _assert_success(
-                                        self,
-                                        client.post(
-                                            f"/api/v1/conversations/{conversation_id}/messages",
-                                            json={"content_text": f"Hello {mode}", "message_type": "text"},
-                                            headers=headers,
-                                        ),
-                                    )
-                                    self.assertEqual(data["conversation_id"], conversation_id)
-                                elif route == 3:
-                                    data, _ = _assert_success(
-                                        self,
-                                        client.post(
-                                            f"/api/v1/conversations/{conversation_id}/read",
-                                            json={"last_read_message_id": f"message_{mode}"},
-                                            headers=headers,
-                                        ),
-                                    )
-                                    self.assertEqual(data["conversation_id"], conversation_id)
-                                elif route == 4:
-                                    data, _ = _assert_success(
-                                        self,
-                                        client.post(
-                                            f"/api/v1/conversations/{conversation_id}/typing",
-                                            json={"is_typing": True},
-                                            headers=headers,
-                                        ),
-                                    )
-                                    self.assertTrue(data["is_typing"])
-                                elif route == 5:
-                                    response = client.get("/api/v1/conversations/conversation_missing", headers=headers)
-                                    _assert_error(self, response, 404, 3004)
-                                elif route == 6:
-                                    response = client.post(
-                                        f"/api/v1/conversations/{conversation_id}/messages",
-                                        json={"content_text": "bad", "message_type": "broken"},
-                                        headers=headers,
-                                    )
-                                    _assert_error(self, response, 422, 2001)
-                                else:
-                                    response = client.get("/api/v1/conversations", params={"page_size": 0}, headers=headers)
-                                    _assert_error(self, response, 422, 2001)
+            order_payload, _ = _assert_ok(
+                self,
+                harness.client.post(
+                    "/api/v1/orders",
+                    headers=_auth_headers(fixture["buyer_token"]),
+                    json={
+                        "listing_id": fixture["listing_id"],
+                        "address_id": fixture["address_id"],
+                    },
+                ),
+            )
+            order_id = str(order_payload["order"]["id"])
+            listing_record = harness.store.get_record("listing", fixture["listing_id"])
+            self.assertEqual(listing_record["payload"]["status"], "reserved")
 
-                            else:
-                                route = mode % 8
-                                if state == "fresh":
-                                    order_id = harness.make_order(buyer_id=current_user_id, seller_id=harness.demo_seller_id, listing_id=harness.demo_listing_id, status="shipped")
-                                else:
-                                    order_id = harness.demo_order_id
-                                if route == 0:
-                                    data, _ = _assert_success(self, client.get("/api/v1/orders", headers=headers))
-                                    self.assertIsInstance(data, list)
-                                elif route == 1:
-                                    data, _ = _assert_success(self, client.get(f"/api/v1/orders/{order_id}", headers=headers))
-                                    self.assertEqual(data["order"]["id"], order_id)
-                                elif route == 2:
-                                    data, _ = _assert_success(self, client.get(f"/api/v1/orders/{order_id}/timeline", headers=headers))
-                                    self.assertIsInstance(data, list)
-                                elif route == 3:
-                                    data, _ = _assert_success(self, client.get(f"/api/v1/orders/{order_id}/shipment", headers=headers))
-                                    self.assertIn("carrier_name", data)
-                                elif route == 4:
-                                    data, _ = _assert_success(self, client.post(f"/api/v1/orders/{order_id}/confirm-receipt", headers=headers))
-                                    self.assertEqual(data["order"]["status"], "completed")
-                                elif route == 5:
-                                    data, _ = _assert_success(self, client.post(f"/api/v1/orders/{order_id}/cancel", headers=headers))
-                                    self.assertEqual(data["order"]["status"], "cancelled")
-                                elif route == 6:
-                                    response = client.get("/api/v1/orders/order_missing", headers=headers)
-                                    _assert_error(self, response, 404, 3004)
-                                else:
-                                    response = client.post("/api/v1/orders/order_missing/confirm-receipt", headers=headers)
-                                    _assert_error(self, response, 404, 3004)
+            cancelled, _ = _assert_ok(
+                self,
+                harness.client.post(
+                    f"/api/v1/orders/{order_id}/cancel",
+                    headers=_auth_headers(fixture["buyer_token"]),
+                    json={},
+                ),
+            )
+            self.assertEqual(cancelled["order"]["status"], "cancelled")
 
-            self.assertEqual(case_count, 512)
+            listing_record = harness.store.get_record("listing", fixture["listing_id"])
+            self.assertEqual(listing_record["payload"]["status"], "live")
 
-    def test_marketplace_store_matrix(self) -> None:
-        families = [
-            "paginate",
-            "records",
-            "identity",
-            "addresses",
-            "stats",
-            "preview",
-            "public",
-            "search",
-        ]
+            order_detail, _ = _assert_ok(
+                self,
+                harness.client.get(
+                    f"/api/v1/orders/{order_id}",
+                    headers=_auth_headers(fixture["buyer_token"]),
+                ),
+            )
+            self.assertEqual(order_detail["order"]["status"], "cancelled")
 
-        with backend_harness("marketplace_store") as harness:
-            case_count = 0
+    def test_order_dispute_flow(self) -> None:
+        with backend_harness("order_dispute") as harness:
+            fixture = _create_marketplace_fixture(harness)
+            order_id = _create_paid_order(harness, fixture)
 
-            for family in families:
-                for variant in range(8):
-                    for mode in range(8):
-                        case_count += 1
-                        with self.subTest(family=family, variant=variant, mode=mode):
-                            if family == "paginate":
-                                items = [{"id": f"item_{index}"} for index in range(variant + mode)]
-                                page = variant - 2 if mode % 2 == 0 else variant + 1
-                                page_size = mode - 1 if variant % 2 == 0 else mode + 1
-                                page_items, meta = harness.store.paginate(items, page=page, page_size=page_size)
-                                self.assertEqual(meta["page"], max(page, 1))
-                                self.assertEqual(meta["page_size"], max(page_size, 1))
-                                self.assertLessEqual(len(page_items), max(page_size, 1))
-                                self.assertEqual(meta["total"], len(items))
+            _assert_ok(
+                self,
+                harness.client.post(
+                    f"/api/v1/orders/{order_id}/ship",
+                    headers=_auth_headers(fixture["seller_token"]),
+                    json={"carrier_name": "SF", "tracking_no": "SF123456"},
+                ),
+            )
 
-                            elif family == "records":
-                                entity_type = f"matrix_record_{variant}"
-                                entity_id = f"record_{mode}_{uuid.uuid4().hex[:8]}"
-                                payload = {"id": entity_id, "value": mode, "variant": variant}
-                                stored = harness.store.upsert_record(entity_type, entity_id, payload)
-                                self.assertEqual(stored["entity_id"], entity_id)
-                                fetched = harness.store.get_record(entity_type, entity_id)
-                                self.assertIsNotNone(fetched)
-                                harness.store.delete_record(entity_type, entity_id)
-                                self.assertIsNone(harness.store.get_record(entity_type, entity_id))
+            disputed, _ = _assert_ok(
+                self,
+                harness.client.post(
+                    f"/api/v1/orders/{order_id}/dispute",
+                    headers=_auth_headers(fixture["buyer_token"]),
+                    json={"reason": "Package arrived damaged."},
+                ),
+            )
+            self.assertEqual(disputed["order"]["status"], "disputed")
 
-                            elif family == "identity":
-                                identifier = f"identity-{variant}-{mode}-{uuid.uuid4().hex[:8]}"
-                                user_id, access_token, refresh_token = harness.make_user_session(identifier=identifier)
-                                session = harness.store.session_by_token(access_token)
-                                self.assertIsNotNone(session)
-                                self.assertEqual(harness.store.user_by_identifier(identifier)["entity_id"], user_id)
-                                self.assertTrue(harness.store.verify_password(harness.store.user_record(user_id), "TempPass123!"))
-                                revoked = harness.store.revoke_session(access_token)
-                                self.assertIsNotNone(revoked)
-                                self.assertIsNone(harness.store.session_by_token(access_token))
-                                current_user = harness.store.current_user(refresh_token)
-                                self.assertIsNotNone(current_user)
+            receipt, _ = _assert_ok(
+                self,
+                harness.client.get(
+                    f"/api/v1/orders/{order_id}/receipt",
+                    headers=_auth_headers(fixture["buyer_token"]),
+                ),
+            )
+            self.assertEqual(receipt["shipment"]["status"], "shipped")
 
-                            elif family == "addresses":
-                                user_id, _, _ = harness.make_user_session(identifier=f"address-user-{variant}-{mode}-{uuid.uuid4().hex[:4]}")
-                                address_id = harness.make_address(user_id=user_id, is_default=mode % 2 == 0)
-                                current = harness.store.get_user_address(address_id)
-                                self.assertIsNotNone(current)
-                                updated = harness.store.update_user_address(address_id, {"recipient_name": f"Updated {variant}", "is_default": True})
-                                self.assertTrue(updated["payload"]["is_default"])
-                                self.assertEqual(harness.store.default_user_address(user_id)["entity_id"], address_id)
-                                harness.store.delete_user_address(address_id)
-                                self.assertIsNone(harness.store.get_user_address(address_id))
+    def test_order_completion_review_wallet_membership_and_notifications(self) -> None:
+        with backend_harness("order_complete") as harness:
+            fixture = _create_marketplace_fixture(harness)
 
-                            elif family == "stats":
-                                user_id = harness.demo_buyer_id if mode % 2 == 0 else harness.demo_seller_id
-                                harness.make_listing(title=f"Stats Listing {variant}-{mode}", seller_id=user_id)
-                                harness.make_order(buyer_id=user_id, seller_id=harness.demo_seller_id, listing_id=harness.demo_listing_id, status="completed")
-                                harness.make_order(buyer_id=harness.demo_buyer_id, seller_id=user_id, listing_id=harness.demo_listing_id, status="shipped")
-                                harness.store.upsert_record(
-                                    "listing_favorite",
-                                    f"favorite_{user_id}_{variant}_{mode}",
-                                    {"user_id": user_id, "listing_id": harness.demo_listing_id, "created_at": "now"},
-                                    parent_id=harness.demo_listing_id,
-                                )
-                                stats = harness.store.user_stats_payload(user_id)
-                                badge = harness.store.badge_summary_payload(user_id)
-                                self.assertEqual(stats["user_id"], user_id)
-                                self.assertGreaterEqual(stats["posts_count"], 1)
-                                self.assertIn("unread_notifications", badge)
+            order_payload, _ = _assert_ok(
+                self,
+                harness.client.post(
+                    "/api/v1/orders",
+                    headers=_auth_headers(fixture["buyer_token"]),
+                    json={
+                        "listing_id": fixture["listing_id"],
+                        "address_id": fixture["address_id"],
+                    },
+                ),
+            )
+            order_id = str(order_payload["order"]["id"])
 
-                            elif family == "preview":
-                                listing_id = f"preview_{variant}_{mode}_{uuid.uuid4().hex[:6]}"
-                                ready = mode % 2 == 0
-                                preview_status = ["ready", "failed", "generating", "pending"][mode % 4]
-                                harness.make_listing(title=f"Preview {variant}-{mode}", listing_id=listing_id, preview_ready=ready, preview_status=preview_status)
-                                preview = harness.store.listing_preview_payload(listing_id)
-                                self.assertIn("placeholder", preview)
-                                self.assertIn(preview["preview_status"], {"ready", "failed", "generating", "pending"})
-                                if ready:
-                                    self.assertTrue(preview["is_ready"])
+            success_page, _ = _assert_ok(
+                self,
+                harness.client.get(
+                    f"/api/v1/pages/orders/{order_id}/success",
+                    headers=_auth_headers(fixture["buyer_token"]),
+                ),
+            )
+            self.assertEqual(success_page["page_key"], "order_success")
 
-                            elif family == "public":
-                                user_id = harness.demo_buyer_id if mode % 2 == 0 else harness.demo_seller_id
-                                listing_id = harness.demo_listing_id
-                                profile = harness.store.public_profile_payload(user_id)
-                                listing = harness.store.public_listing_payload(listing_id)
-                                health = harness.store.health_snapshot()
-                                version = harness.store.version_snapshot()
-                                config = harness.store.public_config_snapshot()
-                                self.assertIn("stats", profile)
-                                self.assertIn("preview_status", listing)
-                                self.assertEqual(health["status"], "ok")
-                                self.assertEqual(version["api_version"], "v1")
-                                self.assertIn("supported_locales", config)
+            _assert_error(
+                self,
+                harness.client.get(
+                    f"/api/v1/pages/reviews/{order_id}",
+                    headers=_auth_headers(fixture["buyer_token"]),
+                ),
+                expected_status=409,
+                expected_code=3002,
+            )
 
-                            else:
-                                documents = harness.store.search_documents()
-                                self.assertGreaterEqual(len(documents), 1)
-                                default_user_id = harness.store.default_user_id()
-                                self.assertIsInstance(default_user_id, str)
-                                categories = harness.store.list_records("category")
-                                self.assertGreaterEqual(len(categories), 1)
+            _assert_ok(
+                self,
+                harness.client.post(
+                    f"/api/v1/orders/{order_id}/ship",
+                    headers=_auth_headers(fixture["seller_token"]),
+                    json={"carrier_name": "SF", "tracking_no": "SF123456"},
+                ),
+            )
 
-            self.assertEqual(case_count, 512)
+            receipt, _ = _assert_ok(
+                self,
+                harness.client.get(
+                    f"/api/v1/orders/{order_id}/receipt",
+                    headers=_auth_headers(fixture["buyer_token"]),
+                ),
+            )
+            self.assertEqual(receipt["shipment"]["status"], "shipped")
 
-    def test_marketplace_commerce_matrix(self) -> None:
-        families = [
-            "favorites",
-            "drafts",
-            "conversations",
-            "orders",
-            "reviews",
-            "wallet",
-            "membership",
-            "notifications",
-        ]
+            completed, _ = _assert_ok(
+                self,
+                harness.client.post(
+                    f"/api/v1/orders/{order_id}/confirm-receipt",
+                    headers=_auth_headers(fixture["buyer_token"]),
+                    json={},
+                ),
+            )
+            self.assertEqual(completed["order"]["status"], "completed")
 
-        with backend_harness("marketplace_commerce") as harness:
-            tokens = _make_matrix_tokens(harness)
-            fresh_user_id = tokens["fresh_user_id"]
-            case_count = 0
+            listing_record = harness.store.get_record("listing", fixture["listing_id"])
+            self.assertEqual(listing_record["payload"]["status"], "sold")
 
-            for family in families:
-                for state in AUTH_STATES:
-                    for mode in range(8):
-                        case_count += 1
-                        with self.subTest(family=family, state=state, mode=mode):
-                            prefer_fresh_valid = True
-                            headers = _headers_for_state(
-                                harness,
-                                state,
-                                tokens["fresh"],
-                                tokens["revoked"],
-                                prefer_fresh_valid=prefer_fresh_valid,
-                            )
-                            client = harness.client
-                            valid_state = state not in {"none", "invalid", "revoked", "garbage"}
-                            current_user_id = fresh_user_id if state == "fresh" else harness.demo_buyer_id
+            review_page, _ = _assert_ok(
+                self,
+                harness.client.get(
+                    f"/api/v1/pages/reviews/{order_id}",
+                    headers=_auth_headers(fixture["buyer_token"]),
+                ),
+            )
+            self.assertEqual(review_page["page_key"], "review_order")
 
-                            if not valid_state:
-                                if family == "orders" and mode in {0, 1, 2, 3, 4, 5}:
-                                    response = client.get("/api/v1/orders", headers=headers)
-                                elif family == "conversations" and mode in {0, 1, 2, 3, 4}:
-                                    response = client.get("/api/v1/conversations", headers=headers)
-                                elif family == "reviews" and mode in {0, 1, 2, 3, 4, 5, 6, 7}:
-                                    response = client.get("/api/v1/wallet", headers=headers)
-                                else:
-                                    response = client.get("/api/v1/wallet", headers=headers)
-                                _assert_error(self, response, 401, 1001)
-                                continue
+            review_tags, _ = _assert_ok(self, harness.client.get("/api/v1/reviews/tags"))
+            self.assertGreaterEqual(len(review_tags), 1)
 
-                            if family == "favorites":
-                                listing_id = harness.make_listing(title=f"Fav {mode}", seller_id=current_user_id, status="live")
-                                if mode % 2 == 0:
-                                    data, _ = _assert_success(self, client.post(f"/api/v1/listings/{listing_id}/favorite", headers=headers))
-                                    self.assertTrue(data["favorite"])
-                                else:
-                                    client.post(f"/api/v1/listings/{listing_id}/favorite", headers=headers)
-                                    data, _ = _assert_success(self, client.delete(f"/api/v1/listings/{listing_id}/favorite", headers=headers))
-                                    self.assertFalse(data["favorite"])
+            review_draft, _ = _assert_ok(
+                self,
+                harness.client.get(
+                    f"/api/v1/orders/{order_id}/review-draft",
+                    headers=_auth_headers(fixture["buyer_token"]),
+                ),
+            )
+            self.assertEqual(review_draft["order_id"], order_id)
+            self.assertIsNone(review_draft["rating"])
 
-                            elif family == "drafts":
-                                data, _ = _assert_success(
-                                    self,
-                                    client.post(
-                                        "/api/v1/listings/drafts",
-                                        json={
-                                            "title": f"Draft {mode}",
-                                            "subtitle": "Matrix subtitle",
-                                            "description": "Matrix description",
-                                            "category_id": "cat_home",
-                                            "price_minor": 19900,
-                                            "original_price_minor": 29900,
-                                            "currency": "CNY",
-                                            "condition_level": "good",
-                                            "location_city": "Matrix City",
-                                            "draft_payload_json": {"mode": mode},
-                                        },
-                                        headers=headers,
-                                    ),
-                                )
-                                draft_id = data["id"]
-                                if mode % 4 == 0:
-                                    detail, _ = _assert_success(self, client.get(f"/api/v1/listings/drafts/{draft_id}", headers=headers))
-                                    self.assertEqual(detail["id"], draft_id)
-                                elif mode % 4 == 1:
-                                    updated, _ = _assert_success(
-                                        self,
-                                        client.patch(
-                                            f"/api/v1/listings/drafts/{draft_id}",
-                                            json={"title": f"Updated Draft {mode}", "draft_payload_json": {"updated": True}},
-                                            headers=headers,
-                                        ),
-                                    )
-                                    self.assertEqual(updated["title"], f"Updated Draft {mode}")
-                                elif mode % 4 == 2:
-                                    published, _ = _assert_success(self, client.post(f"/api/v1/listings/drafts/{draft_id}/publish", headers=headers))
-                                    self.assertEqual(published["status"], "live")
-                                else:
-                                    response = client.get("/api/v1/listings/drafts/missing", headers=headers)
-                                    _assert_error(self, response, 404, 3004)
+            updated_draft, _ = _assert_ok(
+                self,
+                harness.client.patch(
+                    f"/api/v1/orders/{order_id}/review-draft",
+                    headers=_auth_headers(fixture["buyer_token"]),
+                    json={
+                        "rating": 5,
+                        "content": "Exactly as described.",
+                        "tags": ["as_described"],
+                    },
+                ),
+            )
+            self.assertEqual(updated_draft["rating"], 5)
+            self.assertEqual(updated_draft["content"], "Exactly as described.")
 
-                            elif family == "conversations":
-                                conversation_id = harness.make_conversation(buyer_id=current_user_id, seller_id=harness.demo_seller_id, listing_id=harness.demo_listing_id)
-                                if mode % 4 == 0:
-                                    data, _ = _assert_success(self, client.get("/api/v1/conversations", headers=headers))
-                                    self.assertIsInstance(data, list)
-                                elif mode % 4 == 1:
-                                    data, _ = _assert_success(self, client.get(f"/api/v1/conversations/{conversation_id}", headers=headers))
-                                    self.assertEqual(data["conversation"]["id"], conversation_id)
-                                elif mode % 4 == 2:
-                                    data, _ = _assert_success(
-                                        self,
-                                        client.post(
-                                            f"/api/v1/conversations/{conversation_id}/messages",
-                                            json={"content_text": f"Message {mode}", "message_type": "text"},
-                                            headers=headers,
-                                        ),
-                                    )
-                                    self.assertEqual(data["conversation_id"], conversation_id)
-                                else:
-                                    data, _ = _assert_success(
-                                        self,
-                                        client.post(
-                                            f"/api/v1/conversations/{conversation_id}/read",
-                                            json={"last_read_message_id": f"message_{mode}"},
-                                            headers=headers,
-                                        ),
-                                    )
-                                    self.assertEqual(data["conversation_id"], conversation_id)
+            review, _ = _assert_ok(
+                self,
+                harness.client.post(
+                    "/api/v1/reviews",
+                    headers=_auth_headers(fixture["buyer_token"]),
+                    json={
+                        "order_id": order_id,
+                        "rating": 5,
+                        "content": "Exactly as described.",
+                        "tags": ["as_described"],
+                        "media_asset_ids": [],
+                        "anonymity_enabled": False,
+                    },
+                ),
+            )
+            self.assertEqual(review["order_id"], order_id)
+            self.assertEqual(review["rating"], 5)
 
-                            elif family == "orders":
-                                order_id = harness.make_order(buyer_id=current_user_id, seller_id=harness.demo_seller_id, listing_id=harness.demo_listing_id, status="shipped")
-                                if mode % 4 == 0:
-                                    data, _ = _assert_success(self, client.get(f"/api/v1/orders/{order_id}", headers=headers))
-                                    self.assertEqual(data["order"]["id"], order_id)
-                                elif mode % 4 == 1:
-                                    data, _ = _assert_success(self, client.get(f"/api/v1/orders/{order_id}/timeline", headers=headers))
-                                    self.assertIsInstance(data, list)
-                                elif mode % 4 == 2:
-                                    data, _ = _assert_success(self, client.post(f"/api/v1/orders/{order_id}/confirm-receipt", headers=headers))
-                                    self.assertEqual(data["order"]["status"], "completed")
-                                else:
-                                    data, _ = _assert_success(self, client.post(f"/api/v1/orders/{order_id}/cancel", headers=headers))
-                                    self.assertEqual(data["order"]["status"], "cancelled")
+            listing_reviews, _ = _assert_ok(
+                self,
+                harness.client.get(f"/api/v1/listings/{fixture['listing_id']}/reviews"),
+            )
+            self.assertEqual(len(listing_reviews), 1)
+            self.assertEqual(listing_reviews[0]["id"], review["id"])
 
-                            elif family == "reviews":
-                                order_id = harness.make_order(buyer_id=current_user_id, seller_id=harness.demo_seller_id, listing_id=harness.demo_listing_id, status="completed")
-                                if mode % 4 == 0:
-                                    data, _ = _assert_success(self, client.get("/api/v1/reviews", headers=headers))
-                                    self.assertIsInstance(data, list)
-                                elif mode % 4 == 1:
-                                    data, _ = _assert_success(
-                                        self,
-                                        client.post(
-                                            "/api/v1/reviews",
-                                            json={
-                                                "order_id": order_id,
-                                                "listing_id": harness.demo_listing_id,
-                                                "rating": 5,
-                                                "tags": ["发货快", "与描述一致"],
-                                                "content": f"Review {mode}",
-                                                "media_asset_ids": [f"media_{mode}"],
-                                                "anonymity_enabled": False,
-                                            },
-                                            headers=headers,
-                                        ),
-                                    )
-                                    self.assertEqual(data["order_id"], order_id)
-                                elif mode % 4 == 2:
-                                    review_id = harness.make_review(order_id=order_id)
-                                    data, _ = _assert_success(self, client.get(f"/api/v1/reviews/{review_id}", headers=headers))
-                                    self.assertEqual(data["id"], review_id)
-                                else:
-                                    response = client.post(
-                                        "/api/v1/reviews",
-                                        json={
-                                            "order_id": order_id,
-                                            "listing_id": harness.demo_listing_id,
-                                            "rating": 0,
-                                            "content": "broken",
-                                        },
-                                        headers=headers,
-                                    )
-                                    _assert_error(self, response, 422, 2001)
+            seller_wallet, _ = _assert_ok(
+                self,
+                harness.client.get(
+                    "/api/v1/wallet/summary",
+                    headers=_auth_headers(fixture["seller_token"]),
+                ),
+            )
+            transaction_types = {
+                item["transaction_type"] for item in seller_wallet["transactions"]
+            }
+            self.assertIn("sale_income", transaction_types)
 
-                            elif family == "wallet":
-                                if mode % 4 == 0:
-                                    data, _ = _assert_success(self, client.get("/api/v1/wallet", headers=headers))
-                                    self.assertIn("transactions", data)
-                                elif mode % 4 == 1:
-                                    data, _ = _assert_success(self, client.get("/api/v1/wallet/transactions", headers=headers))
-                                    self.assertIsInstance(data, list)
-                                elif mode % 4 == 2:
-                                    data, _ = _assert_success(self, client.get("/api/v1/wallet", headers=headers))
-                                    self.assertIn("account", data)
-                                else:
-                                    data, _ = _assert_success(self, client.get("/api/v1/wallet/transactions", headers=headers))
-                                    self.assertIsInstance(data, list)
+            upgraded, _ = _assert_ok(
+                self,
+                harness.client.post(
+                    "/api/v1/membership/upgrade",
+                    headers=_auth_headers(fixture["buyer_token"]),
+                    json={"plan_key": "pro"},
+                ),
+            )
+            self.assertEqual(upgraded["status"], "active")
 
-                            elif family == "membership":
-                                if mode % 4 == 0:
-                                    data, _ = _assert_success(self, client.get("/api/v1/membership/plans", headers=headers))
-                                    self.assertIsInstance(data, list)
-                                elif mode % 4 == 1:
-                                    data, _ = _assert_success(self, client.get("/api/v1/membership/subscription", headers=headers))
-                                    self.assertTrue(data is None or "plan" in data)
-                                elif mode % 4 == 2:
-                                    data, _ = _assert_success(self, client.post("/api/v1/membership/upgrade", json={"plan_key": "gold"}, headers=headers))
-                                    self.assertEqual(data["status"], "active")
-                                else:
-                                    response = client.post("/api/v1/membership/upgrade", json={"plan_key": "missing"}, headers=headers)
-                                    _assert_error(self, response, 404, 3004)
+            membership_current, _ = _assert_ok(
+                self,
+                harness.client.get(
+                    "/api/v1/memberships/current",
+                    headers=_auth_headers(fixture["buyer_token"]),
+                ),
+            )
+            self.assertEqual(membership_current["plan"]["plan_key"], "pro")
 
-                            else:
-                                if mode % 4 == 0:
-                                    data, _ = _assert_success(self, client.get("/api/v1/notifications", headers=headers))
-                                    self.assertIsInstance(data, list)
-                                elif mode % 4 == 1:
-                                    data, _ = _assert_success(self, client.get("/api/v1/badges/summary", headers=headers))
-                                    self.assertIn("unread_notifications", data)
-                                elif mode % 4 == 2:
-                                    data, _ = _assert_success(self, client.post("/api/v1/notifications/read", json={"read_at": None}, headers=headers))
-                                    self.assertIn("read_count", data)
-                                else:
-                                    notification_id = f"notification_{uuid.uuid4().hex[:10]}"
-                                    harness.store.upsert_record(
-                                        "notification",
-                                        notification_id,
-                                        {
-                                            "id": notification_id,
-                                            "user_id": current_user_id,
-                                            "notification_type": "system",
-                                            "title": f"Commerce Notice {mode}",
-                                            "body": "Commerce matrix notification",
-                                            "entity_type": "order",
-                                            "entity_id": order_id,
-                                            "read_at": None,
-                                            "created_at": "2026-04-10T00:00:00Z",
-                                        },
-                                    )
-                                    data, _ = _assert_success(
-                                        self,
-                                        client.patch(f"/api/v1/notifications/{notification_id}/read", json={}, headers=headers),
-                                    )
-                                    self.assertEqual(data["id"], notification_id)
+            seller_notifications, _ = _assert_ok(
+                self,
+                harness.client.get(
+                    "/api/v1/notifications",
+                    headers=_auth_headers(fixture["seller_token"]),
+                ),
+            )
+            self.assertGreaterEqual(len(seller_notifications), 1)
 
-            self.assertEqual(case_count, 512)
+            read_all, _ = _assert_ok(
+                self,
+                harness.client.post(
+                    "/api/v1/notifications/read-all",
+                    headers=_auth_headers(fixture["seller_token"]),
+                    json={},
+                ),
+            )
+            self.assertGreaterEqual(read_all["read_count"], 1)
 
-    def test_reconstruction_matrix(self) -> None:
-        families = [
-            "serialize",
-            "create",
-            "pipeline_start",
-            "pipeline_cancel",
-            "mask_debug",
-            "mask_preview",
-            "mask_confirm",
-            "viewer_publish_list_delete",
-        ]
+    def test_reconstruction_auth_and_ownership(self) -> None:
+        with backend_harness("reconstruction_security") as harness:
+            seller_id, seller_token, _ = harness.make_user_session(
+                identifier="seller-recon",
+                display_name="Seller",
+            )
+            other_id, other_token, _ = harness.make_user_session(
+                identifier="other-recon",
+                display_name="Other",
+            )
 
-        with backend_harness("reconstruction_matrix") as harness:
-            case_count = 0
+            _assert_error(
+                self,
+                harness.client.get("/api/v1/reconstructions"),
+                expected_status=401,
+                expected_code=1001,
+            )
 
-            for family in families:
-                for state in range(8):
-                    for mode in range(8):
-                        case_count += 1
-                        with self.subTest(family=family, state=state, mode=mode):
-                            request = SimpleNamespace(base_url="http://testserver/")
+            with patch.object(
+                reconstructions_module,
+                "_validate_uploaded_video",
+                return_value={
+                    "streams": [{"codec_type": "video"}],
+                    "format": {"duration": 1.0},
+                },
+            ):
+                unauthenticated_create = harness.client.post(
+                    "/api/v1/reconstructions",
+                    data={
+                        "title": "Unauthenticated Task",
+                        "description": "Should fail",
+                        "price": "99.00",
+                    },
+                    files={"video": ("clip.mp4", b"video-bytes", "video/mp4")},
+                )
+                _assert_error(
+                    self,
+                    unauthenticated_create,
+                    expected_status=401,
+                    expected_code=1001,
+                )
 
-                            if family == "serialize":
-                                task_id = f"serialize_{state}_{mode}_{uuid.uuid4().hex[:8]}"
-                                viewer_config = {
-                                    "model_rotation_deg": [float(mode), 1.0, 2.0],
-                                    "model_translation": [3.0, 4.0, 5.0],
-                                    "model_scale": 1.0 + mode / 10,
-                                    "camera_rotation_deg": [-18.0, 26.0, 0.0],
-                                    "camera_distance": 1.6,
-                                }
-                                task = harness.make_task(
-                                    task_id=task_id,
-                                    status="ready" if mode % 2 == 0 else "uploaded",
-                                    quality_profile="balanced",
-                                    object_masking=mode % 2 == 0,
-                                    model_rel_path=f"/storage/models/{task_id}/model.ply",
-                                    viewer_config=viewer_config,
-                                    mask_prompt_frame_name="frame_001.jpg",
-                                    mask_prompt_frame_rel_path=f"/storage/processed/{task_id}/frame_001.jpg",
-                                )
-                                model_dir = harness.storage_root / "models" / task_id
-                                model_dir.mkdir(parents=True, exist_ok=True)
-                                (model_dir / "model.ply").write_bytes(b"ply")
-                                response = reconstructions_module._serialize_task(request, task)
-                                self.assertEqual(response.task_id, task_id)
-                                self.assertIsNotNone(response.viewer_url)
-                                if mode % 2 == 0:
-                                    self.assertTrue(response.object_masking)
+                created = harness.client.post(
+                    "/api/v1/reconstructions",
+                    headers=_auth_headers(seller_token),
+                    data={
+                        "title": "Seller Task",
+                        "description": "Owned by seller",
+                        "price": "99.00",
+                    },
+                    files={"video": ("clip.mp4", b"video-bytes", "video/mp4")},
+                )
 
-                            elif family == "create":
-                                if mode == 0:
-                                    with patch.object(reconstructions_module, "_validate_uploaded_video", return_value={"streams": [{"codec_type": "video"}], "format": {"duration": 1.0}}):
-                                        response = harness.client.post(
-                                            "/api/v1/reconstructions",
-                                            data={"title": f"Task {mode}", "description": "Desc", "price": "99.00"},
-                                            files={"video": ("clip.mp4", b"video-bytes", "video/mp4")},
-                                        )
-                                    data, _ = _assert_success(self, response, expected_status=201)
-                                    self.assertEqual(data["status"], "uploaded")
-                                elif mode == 1:
-                                    response = harness.client.post(
-                                        "/api/v1/reconstructions",
-                                        data={"title": f"Task {mode}", "description": "Desc", "price": "99.00"},
-                                        files={"video": ("clip.mp4", b"video-bytes", "text/plain")},
-                                    )
-                                    _assert_error(self, response, 400, 3001)
-                                elif mode == 2:
-                                    response = harness.client.post(
-                                        "/api/v1/reconstructions",
-                                        data={"title": f"Task {mode}", "description": "Desc", "price": "99.00"},
-                                        files={"video": ("", b"video-bytes", "video/mp4")},
-                                    )
-                                    _assert_error(self, response, 422, 2001)
-                                else:
-                                    with patch.object(reconstructions_module, "_validate_uploaded_video", return_value={"streams": [{"codec_type": "video"}], "format": {"duration": 1.0}}):
-                                        response = harness.client.post(
-                                            "/api/v1/reconstructions",
-                                            data={"title": f"Task {mode}", "description": "Desc", "price": "99.00"},
-                                            files={"video": (f"clip-{mode}.mp4", b"video-bytes", "video/mp4")},
-                                        )
-                                    data, _ = _assert_success(self, response, expected_status=201)
-                                    self.assertEqual(data["title"], f"Task {mode}")
+            self.assertEqual(created.status_code, 201)
+            created_payload = created.json()
+            created_task_id = str(created_payload["task_id"])
+            created_task = get_task(created_task_id)
+            self.assertEqual(created_task["seller_id"], seller_id)
 
-                            elif family == "pipeline_start":
-                                task_id = f"start_{state}_{mode}_{uuid.uuid4().hex[:8]}"
-                                task = harness.make_task(task_id=task_id, status="uploaded" if mode % 2 == 0 else "queued", quality_profile="balanced")
-                                if task["status"] == "uploaded":
-                                    with patch.object(reconstructions_module, "_start_pipeline_subprocess", return_value=4321):
-                                        response = harness.client.post(
-                                            f"/api/v1/reconstructions/{task_id}/pipeline/start",
-                                            json={"quality_profile": "balanced", "train_max_steps": 7000, "object_masking": mode % 2 == 0},
-                                        )
-                                    data, _ = _assert_success(self, response)
-                                    self.assertEqual(data["status"], "queued")
-                                else:
-                                    response = harness.client.post(
-                                        f"/api/v1/reconstructions/{task_id}/pipeline/start",
-                                        json={"quality_profile": "balanced", "train_max_steps": 7000, "object_masking": False},
-                                    )
-                                    _assert_error(self, response, 409, 3002)
+            seller_tasks = harness.client.get(
+                "/api/v1/reconstructions",
+                headers=_auth_headers(seller_token),
+            )
+            self.assertEqual(seller_tasks.status_code, 200)
+            self.assertEqual(len(seller_tasks.json()), 1)
+            self.assertEqual(seller_tasks.json()[0]["task_id"], created_task_id)
 
-                            elif family == "pipeline_cancel":
-                                task_id = f"cancel_{state}_{mode}_{uuid.uuid4().hex[:8]}"
-                                task = harness.make_task(task_id=task_id, status="queued" if mode % 2 == 0 else "ready", quality_profile="balanced")
-                                if task["status"] in {"queued", "preprocessing", "masking", "training", "exporting"}:
-                                    with patch.object(reconstructions_module, "_terminate_task_processes", return_value=[4321]):
-                                        response = harness.client.post(f"/api/v1/reconstructions/{task_id}/pipeline/cancel")
-                                    data, _ = _assert_success(self, response)
-                                    self.assertEqual(data["status"], "cancelled")
-                                else:
-                                    response = harness.client.post(f"/api/v1/reconstructions/{task_id}/pipeline/cancel")
-                                    _assert_error(self, response, 409, 3002)
+            other_tasks = harness.client.get(
+                "/api/v1/reconstructions",
+                headers=_auth_headers(other_token),
+            )
+            self.assertEqual(other_tasks.status_code, 200)
+            self.assertEqual(other_tasks.json(), [])
 
-                            elif family == "mask_debug":
-                                task_id = f"maskdebug_{state}_{mode}_{uuid.uuid4().hex[:8]}"
-                                task = harness.make_task(task_id=task_id, status="ready", quality_profile="balanced", object_masking=False)
-                                harness.prepare_mask_debug_dataset(task_id)
-                                with patch.object(reconstructions_module, "select_mask_prompt_frame", return_value=None):
-                                    response = harness.client.post(f"/api/v1/reconstructions/{task_id}/mask-debug")
-                                data, _ = _assert_success(self, response)
-                                self.assertTrue(data["object_masking"])
+            other_detail = harness.client.get(
+                f"/api/v1/reconstructions/{created_task_id}",
+                headers=_auth_headers(other_token),
+            )
+            self.assertEqual(other_detail.status_code, 404)
 
-                            elif family == "mask_preview":
-                                task_id = f"maskpreview_{state}_{mode}_{uuid.uuid4().hex[:8]}"
-                                task = harness.make_task(
-                                    task_id=task_id,
-                                    status="awaiting_mask_prompt" if mode % 2 == 0 else "awaiting_mask_confirmation",
-                                    quality_profile="balanced",
-                                    object_masking=True,
-                                    mask_prompt_frame_name="frame_001.jpg",
-                                    mask_prompt_frame_rel_path=f"/storage/processed/{task_id}/frame_001.jpg",
-                                    mask_prompt_frame_width=1920,
-                                    mask_prompt_frame_height=1080,
-                                )
-                                harness.prepare_mask_preview_artifacts(task_id, "frame_001.jpg")
-                                with patch.object(reconstructions_module, "build_sam2_preview_command", return_value=["sam2-preview"]), patch.object(
-                                    reconstructions_module,
-                                    "run_logged_streaming_command",
-                                    return_value=SimpleNamespace(returncode=0, stderr="", stdout=""),
-                                ):
-                                    response = harness.client.post(
-                                        f"/api/v1/reconstructions/{task_id}/mask-preview",
-                                        json={
-                                            "points": [
-                                                {"x": 0.2, "y": 0.3, "label": 1},
-                                                {"x": 0.7, "y": 0.8, "label": 0},
-                                            ]
-                                        },
-                                    )
-                                data, _ = _assert_success(self, response)
-                                self.assertEqual(data["status"], "awaiting_mask_confirmation")
+            other_start = harness.client.post(
+                f"/api/v1/reconstructions/{created_task_id}/pipeline/start",
+                headers=_auth_headers(other_token),
+                json={
+                    "quality_profile": "balanced",
+                    "train_max_steps": 7000,
+                    "object_masking": False,
+                },
+            )
+            self.assertEqual(other_start.status_code, 404)
 
-                            elif family == "mask_confirm":
-                                task_id = f"maskconfirm_{state}_{mode}_{uuid.uuid4().hex[:8]}"
-                                task = harness.make_task(
-                                    task_id=task_id,
-                                    status="awaiting_mask_confirmation",
-                                    quality_profile="balanced",
-                                    object_masking=True,
-                                    mask_prompt_frame_name="frame_001.jpg",
-                                    mask_prompt_frame_rel_path=f"/storage/processed/{task_id}/frame_001.jpg",
-                                )
-                                harness.prepare_mask_preview_artifacts(task_id, "frame_001.jpg")
-                                with patch.object(reconstructions_module, "_start_pipeline_subprocess", return_value=9876):
-                                    response = harness.client.post(f"/api/v1/reconstructions/{task_id}/mask-confirm")
-                                data, _ = _assert_success(self, response)
-                                self.assertEqual(data["status"], "queued")
+            with patch.object(
+                reconstructions_module,
+                "_start_pipeline_subprocess",
+                return_value=4321,
+            ):
+                started = harness.client.post(
+                    f"/api/v1/reconstructions/{created_task_id}/pipeline/start",
+                    headers=_auth_headers(seller_token),
+                    json={
+                        "quality_profile": "balanced",
+                        "train_max_steps": 7000,
+                        "object_masking": False,
+                    },
+                )
+            self.assertEqual(started.status_code, 200)
+            self.assertEqual(started.json()["status"], "queued")
 
-                            else:
-                                task_id = f"viewer_{state}_{mode}_{uuid.uuid4().hex[:8]}"
-                                viewer_config = {
-                                    "model_rotation_deg": [0.0, 1.0, 2.0],
-                                    "model_translation": [3.0, 4.0, 5.0],
-                                    "model_scale": 1.0,
-                                    "camera_rotation_deg": [-18.0, 26.0, 0.0],
-                                    "camera_distance": 1.6,
-                                }
-                                task = harness.make_task(
-                                    task_id=task_id,
-                                    status="ready" if mode % 2 == 0 else "uploaded",
-                                    quality_profile="balanced",
-                                    object_masking=False,
-                                    model_rel_path=f"/storage/models/{task_id}/model.ply",
-                                    viewer_config=viewer_config,
-                                )
-                                model_dir = harness.storage_root / "models" / task_id
-                                model_dir.mkdir(parents=True, exist_ok=True)
-                                (model_dir / "model.ply").write_bytes(b"ply")
-                                if mode % 4 == 0:
-                                    response = harness.client.put(
-                                        f"/api/v1/reconstructions/{task_id}/viewer",
-                                        json={
-                                            "model_rotation_deg": [0, 10, 20],
-                                            "model_translation": [1, 2, 3],
-                                            "model_scale": 1.25,
-                                            "camera_rotation_deg": [-15, 30, 0],
-                                            "camera_distance": 1.75,
-                                        },
-                                    )
-                                    data, _ = _assert_success(self, response)
-                                    self.assertEqual(data["task_id"], task_id)
-                                elif mode % 4 == 1:
-                                    response = harness.client.post(f"/api/v1/reconstructions/{task_id}/publish")
-                                    if task["status"] == "ready":
-                                        data, _ = _assert_success(self, response)
-                                        self.assertTrue(data["is_published"])
-                                    else:
-                                        _assert_error(self, response, 409, 3002)
-                                elif mode % 4 == 2:
-                                    response = harness.client.get("/api/v1/reconstructions", params={"status": "ready,uploaded"})
-                                    self.assertEqual(response.status_code, 200)
-                                    data = response.json()
-                                    self.assertIsInstance(data, list)
-                                else:
-                                    response = harness.client.delete(f"/api/v1/reconstructions/{task_id}")
-                                    self.assertEqual(response.status_code, 204)
+            publish_task_id = "ready_publish_task"
+            _prepare_ready_task(
+                harness,
+                task_id=publish_task_id,
+                seller_id=seller_id,
+            )
 
-            self.assertEqual(case_count, 512)
+            publish_without_viewer = harness.client.post(
+                f"/api/v1/reconstructions/{publish_task_id}/publish",
+                headers=_auth_headers(seller_token),
+            )
+            _assert_error(
+                self,
+                publish_without_viewer,
+                expected_status=409,
+                expected_code=3002,
+            )
+
+            update_task(
+                publish_task_id,
+                viewer_rotation_done=True,
+                viewer_translation_done=True,
+                viewer_initial_view_done=True,
+                viewer_animation_approved=True,
+            )
+            published = harness.client.post(
+                f"/api/v1/reconstructions/{publish_task_id}/publish",
+                headers=_auth_headers(seller_token),
+            )
+            self.assertEqual(published.status_code, 200)
+            self.assertTrue(published.json()["is_published"])
+
+            other_publish = harness.client.post(
+                f"/api/v1/reconstructions/{publish_task_id}/publish",
+                headers=_auth_headers(other_token),
+            )
+            self.assertEqual(other_publish.status_code, 404)
 
 
 if __name__ == "__main__":
-    import unittest
-
     unittest.main()

@@ -3,16 +3,21 @@
 import 'package:flutter/material.dart';
 
 import '../../core/api/api_client.dart';
+import '../../core/commerce/commerce_repository.dart';
 import '../../core/listings/listings_repository.dart';
 import '../../core/session/app_session.dart';
+import '../../theme/app_colors.dart';
 import '../chat/chat_pages.dart';
+import '../commerce/account_pages.dart';
+import '../commerce/checkout_page.dart';
+import '../commerce/order_pages.dart';
+import '../commerce/review_pages.dart';
 import '../home/home_page.dart';
 import '../listings/listing_detail_page.dart';
 import '../profile/profile_page.dart';
 import '../profile/profile_settings_page.dart';
 import '../search/search_page.dart';
 import '../sell/sell_page.dart';
-import '../../theme/app_colors.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({
@@ -34,24 +39,153 @@ class _AppShellState extends State<AppShell> {
   int _selectedIndex = 0;
   int _marketplaceVersion = 0;
   late final ListingsRepository _listingsRepository;
+  late final CommerceRepository _commerceRepository;
 
   @override
   void initState() {
     super.initState();
     _listingsRepository = ListingsRepository(widget.apiClient);
+    _commerceRepository = CommerceRepository(widget.apiClient);
   }
 
   void _selectTab(int index) {
-    setState(() {
-      _selectedIndex = index;
-    });
+    if (widget.session.isGuest && index >= 2) {
+      _promptLoginRequired();
+      return;
+    }
+    setState(() => _selectedIndex = index);
   }
 
-  void _showComingSoon() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('功能开发中，敬请期待'),
-        duration: Duration(seconds: 2),
+  Future<void> _promptLoginRequired() async {
+    final shouldExitGuest = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('需要登录'),
+        content: const Text('游客模式只支持浏览首页、搜索、商品详情和 3D 预览。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('稍后'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('去登录'),
+          ),
+        ],
+      ),
+    );
+    if (shouldExitGuest == true) {
+      await widget.onSignOut();
+    }
+  }
+
+  Future<void> _openChatForListing(String listingId) async {
+    if (widget.session.isGuest) {
+      await _promptLoginRequired();
+      return;
+    }
+    final detail = await _commerceRepository.createConversation(
+      widget.session.accessToken,
+      listingId: listingId,
+    );
+    final conversation =
+        (detail['conversation'] as Map?)?.cast<String, dynamic>() ??
+        const <String, dynamic>{};
+    final conversationId = conversation['id']?.toString() ?? '';
+    if (!mounted || conversationId.isEmpty) {
+      return;
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ConversationDetailPage(
+          repository: _commerceRepository,
+          session: widget.session,
+          conversationId: conversationId,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openCheckoutForListing(String listingId) async {
+    if (widget.session.isGuest) {
+      await _promptLoginRequired();
+      return;
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => CheckoutPage(
+          session: widget.session,
+          commerceRepository: _commerceRepository,
+          listingsRepository: _listingsRepository,
+          listingId: listingId,
+        ),
+      ),
+    );
+    _markMarketplaceDirty();
+  }
+
+  void _openListingReviews(String listingId) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ListingReviewsPage(
+          repository: _commerceRepository,
+          listingId: listingId,
+        ),
+      ),
+    );
+  }
+
+  void _openOrders() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => OrdersPage(
+          session: widget.session,
+          repository: _commerceRepository,
+        ),
+      ),
+    );
+  }
+
+  void _openWallet() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => WalletPage(
+          session: widget.session,
+          repository: _commerceRepository,
+        ),
+      ),
+    );
+  }
+
+  void _openMembership() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => MembershipPage(
+          session: widget.session,
+          repository: _commerceRepository,
+        ),
+      ),
+    );
+  }
+
+  void _openNotifications() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => NotificationsPage(
+          session: widget.session,
+          repository: _commerceRepository,
+        ),
+      ),
+    );
+  }
+
+  void _openAddresses() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => AddressesPage(
+          session: widget.session,
+          repository: _commerceRepository,
+        ),
       ),
     );
   }
@@ -61,19 +195,18 @@ class _AppShellState extends State<AppShell> {
       MaterialPageRoute<void>(
         builder: (_) => ListingDetailPage(
           repository: _listingsRepository,
+          session: widget.session,
           listingId: listingId,
-          onOpenChat: _showComingSoon,
-          onOpenOrder: _showComingSoon,
-          onOpenReview: _showComingSoon,
+          onOpenChat: () => _openChatForListing(listingId),
+          onOpenOrder: () => _openCheckoutForListing(listingId),
+          onOpenReview: () => _openListingReviews(listingId),
         ),
       ),
     );
   }
 
   void _markMarketplaceDirty() {
-    setState(() {
-      _marketplaceVersion += 1;
-    });
+    setState(() => _marketplaceVersion += 1);
   }
 
   @override
@@ -98,9 +231,8 @@ class _AppShellState extends State<AppShell> {
         onOpenListing: _openListingDetail,
         onMarketplaceChanged: _markMarketplaceDirty,
       ),
-      const MessagesPage(),
+      MessagesPage(repository: _commerceRepository, session: widget.session),
       ProfilePage(
-        key: ValueKey('profile-$_marketplaceVersion'),
         session: widget.session,
         apiClient: widget.apiClient,
         onOpenSettings: () => Navigator.of(context).push(
@@ -119,6 +251,12 @@ class _AppShellState extends State<AppShell> {
         onSignOut: widget.onSignOut,
         repository: _listingsRepository,
         onOpenListing: _openListingDetail,
+        onOpenOrders: _openOrders,
+        onOpenWallet: _openWallet,
+        onOpenMembership: _openMembership,
+        onOpenNotifications: _openNotifications,
+        onOpenAddresses: _openAddresses,
+        onMarketplaceChanged: _markMarketplaceDirty,
       ),
     ];
 
@@ -171,16 +309,9 @@ class _AppShellState extends State<AppShell> {
                           Container(
                             width: 56,
                             height: 56,
-                            decoration: BoxDecoration(
+                            decoration: const BoxDecoration(
                               color: AppColors.accent,
                               shape: BoxShape.circle,
-                              boxShadow: const [
-                                BoxShadow(
-                                  color: Color(0x33FFD83D),
-                                  blurRadius: 22,
-                                  offset: Offset(0, 8),
-                                ),
-                              ],
                             ),
                             child: const Icon(
                               Icons.add_rounded,

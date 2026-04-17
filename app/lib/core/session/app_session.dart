@@ -8,6 +8,7 @@ class AppSession {
   String get accessToken => session['access_token']?.toString() ?? '';
   String? get refreshToken => session['refresh_token']?.toString();
   bool get hasAccessToken => accessToken.isNotEmpty;
+  bool get isGuest => session['guest_mode'] == true || accessToken.isEmpty;
   String get displayName => user['display_name']?.toString() ?? '';
 
   factory AppSession.fromApiData(Map<String, dynamic> data) {

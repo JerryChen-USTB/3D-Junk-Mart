@@ -1,0 +1,7 @@
+[Unit]
+Description=Backup 3DGS marketplace runtime state
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/3dgs-marketplace/repo
+ExecStart=/opt/3dgs-marketplace/repo/backend/.venv/bin/python /opt/3dgs-marketplace/repo/deploy/scripts/backup_runtime_state.py

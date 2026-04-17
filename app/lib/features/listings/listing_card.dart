@@ -7,143 +7,260 @@ import '../../core/listings/listing_models.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/editorial_widgets.dart';
 
+class ListingPreviewController extends ChangeNotifier {
+  String? _activeListingId;
+  int _activationToken = 0;
+
+  String? get activeListingId => _activeListingId;
+
+  bool isActive(String listingId) => _activeListingId == listingId;
+
+  Future<void> activate(String listingId) async {
+    if (_activeListingId == listingId) {
+      return;
+    }
+
+    final token = ++_activationToken;
+    if (_activeListingId != null) {
+      _activeListingId = null;
+      notifyListeners();
+      await Future<void>.delayed(const Duration(milliseconds: 24));
+      if (token != _activationToken) {
+        return;
+      }
+    }
+
+    _activeListingId = listingId;
+    notifyListeners();
+  }
+
+  void clear([String? listingId]) {
+    if (_activeListingId == null) {
+      return;
+    }
+    if (listingId != null && _activeListingId != listingId) {
+      return;
+    }
+    _activationToken++;
+    _activeListingId = null;
+    notifyListeners();
+  }
+}
+
 class ListingCard extends StatelessWidget {
   const ListingCard({
     super.key,
     required this.listing,
     required this.onTap,
     this.tall = false,
+    this.previewController,
   });
 
   final ListingSummary listing;
   final VoidCallback onTap;
   final bool tall;
+  final ListingPreviewController? previewController;
 
   @override
   Widget build(BuildContext context) {
     final topHeight = tall ? 198.0 : 168.0;
     final hasViewer = listing.viewerUrl != null && listing.viewerUrl!.isNotEmpty;
+    final badge = listing.badges.isNotEmpty
+        ? listing.badges.first
+        : listing.has3dBadge
+        ? '3D'
+        : '在售';
 
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(26),
-        child: Container(
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(26),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x14000000),
-                blurRadius: 28,
-                offset: Offset(0, 14),
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (hasViewer)
-                _ViewerCover(
-                  viewerUrl: listing.viewerUrl!,
-                  badge: listing.badges.isNotEmpty
-                      ? listing.badges.first
-                      : '3D 展示',
-                  height: topHeight,
-                )
-              else
-                _ListingCover(
-                  imageUrl: listing.coverImageUrl,
-                  title: listing.title,
-                  subtitle: listing.location,
-                  badge: listing.badges.isNotEmpty
-                      ? listing.badges.first
-                      : listing.has3dBadge
-                      ? '3D'
-                      : '在售',
-                  height: topHeight,
-                  highlight3d: listing.has3dBadge,
+    Widget buildCover({required bool interactiveHint}) {
+      final cover = _ListingCover(
+        imageUrl: listing.coverImageUrl,
+        title: listing.title,
+        subtitle: listing.location,
+        badge: badge,
+        height: topHeight,
+        highlight3d: listing.has3dBadge,
+      );
+      if (!interactiveHint) {
+        return cover;
+      }
+      return SizedBox(
+        height: topHeight,
+        child: Stack(
+          fit: StackFit.expand,
+        children: [
+          cover,
+          Positioned(
+            right: 12,
+            bottom: 12,
+            child: IgnorePointer(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.46),
+                  borderRadius: BorderRadius.circular(999),
                 ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
+                    Icon(Icons.touch_app_rounded, size: 14, color: Colors.white),
+                    SizedBox(width: 6),
                     Text(
-                      listing.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        height: 1.3,
+                      '轻触查看 3D',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
                       ),
-                    ),
-                    if (listing.subtitle.isNotEmpty) ...[
-                      const SizedBox(height: 6),
-                      Text(
-                        listing.subtitle,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ],
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            listing.priceLabel,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.titleLarge
-                                ?.copyWith(
-                                  color: AppColors.coral,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                          ),
-                        ),
-                        if (listing.has3dBadge)
-                          EditorialPill(
-                            label: '3D',
-                            backgroundColor: const Color(0xFFE4F5EE),
-                            foregroundColor: AppColors.mint,
-                            icon: Icons.view_in_ar_rounded,
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.place_rounded,
-                          size: 14,
-                          color: AppColors.textMuted,
-                        ),
-                        const SizedBox(width: 4),
-                        Expanded(
-                          child: Text(
-                            listing.location,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.labelSmall,
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Flexible(
-                          child: Text(
-                            listing.sellerName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.labelSmall,
-                          ),
-                        ),
-                      ],
                     ),
                   ],
                 ),
               ),
-            ],
+            ),
           ),
+        ],
+        ),
+      );
+    }
+
+    Widget mediaSection;
+    if (hasViewer && previewController != null) {
+      mediaSection = AnimatedBuilder(
+        animation: previewController!,
+        builder: (context, _) {
+          final active = previewController!.isActive(listing.id);
+          if (active) {
+            return _ViewerCover(
+              viewerUrl: listing.viewerUrl!,
+              badge: badge,
+              height: topHeight,
+            );
+          }
+          return GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => previewController!.activate(listing.id),
+            child: buildCover(interactiveHint: true),
+          );
+        },
+      );
+    } else if (hasViewer) {
+      mediaSection = _ViewerCover(
+        viewerUrl: listing.viewerUrl!,
+        badge: badge,
+        height: topHeight,
+      );
+    } else {
+      mediaSection = GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: buildCover(interactiveHint: false),
+      );
+    }
+
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(26),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x14000000),
+              blurRadius: 28,
+              offset: Offset(0, 14),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            mediaSection,
+            Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: onTap,
+                borderRadius: const BorderRadius.vertical(
+                  bottom: Radius.circular(26),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        listing.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(
+                          context,
+                        ).textTheme.titleMedium?.copyWith(height: 1.3),
+                      ),
+                      if (listing.subtitle.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          listing.subtitle,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              listing.priceLabel,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.titleLarge
+                                  ?.copyWith(
+                                    color: AppColors.coral,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                            ),
+                          ),
+                          if (listing.has3dBadge)
+                            EditorialPill(
+                              label: '3D',
+                              backgroundColor: const Color(0xFFE4F5EE),
+                              foregroundColor: AppColors.mint,
+                              icon: Icons.view_in_ar_rounded,
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.place_rounded,
+                            size: 14,
+                            color: AppColors.textMuted,
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              listing.location,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.labelSmall,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Flexible(
+                            child: Text(
+                              listing.sellerName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.labelSmall,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -178,7 +295,6 @@ class _ViewerCoverState extends State<_ViewerCover> {
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageFinished: (_) {
-            // Hide all UI and reduce render quality for embed mode.
             _controller.runJavaScript('''
               document.body.classList.add('embed');
               var selectors = ['.hud', '.animation-panel', '#minimal-reset-view', '.overlay'];
@@ -187,22 +303,22 @@ class _ViewerCoverState extends State<_ViewerCover> {
                 els.forEach(function(el) { el.style.display = 'none'; });
               });
 
-              // Lower canvas resolution for card performance.
               var canvas = document.querySelector('canvas');
               if (canvas) {
                 var dpr = Math.min(window.devicePixelRatio, 1.0);
-                canvas.width  = canvas.clientWidth  * dpr;
+                canvas.width = canvas.clientWidth * dpr;
                 canvas.height = canvas.clientHeight * dpr;
               }
             ''');
-            if (mounted) setState(() => _loading = false);
+            if (mounted) {
+              setState(() => _loading = false);
+            }
           },
         ),
       )
       ..loadRequest(_embedUrl(widget.viewerUrl));
   }
 
-  /// Append `embed=1` so the viewer hides all UI controls via CSS too.
   static Uri _embedUrl(String url) {
     final uri = Uri.parse(url);
     final params = Map<String, String>.from(uri.queryParameters);
@@ -219,7 +335,6 @@ class _ViewerCoverState extends State<_ViewerCover> {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            // Dark background behind the viewer.
             const DecoratedBox(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
@@ -229,7 +344,6 @@ class _ViewerCoverState extends State<_ViewerCover> {
                 ),
               ),
             ),
-            // WebView with eager gesture recognizer to prevent scroll conflicts.
             WebViewWidget(
               controller: _controller,
               gestureRecognizers: {
@@ -238,7 +352,6 @@ class _ViewerCoverState extends State<_ViewerCover> {
                 ),
               },
             ),
-            // Loading spinner.
             if (_loading)
               const Center(
                 child: SizedBox(
@@ -250,7 +363,6 @@ class _ViewerCoverState extends State<_ViewerCover> {
                   ),
                 ),
               ),
-            // Badge overlay — use IgnorePointer so touches pass through.
             Positioned(
               left: 14,
               top: 14,
@@ -262,7 +374,6 @@ class _ViewerCoverState extends State<_ViewerCover> {
                 ),
               ),
             ),
-            // 3D icon watermark — use IgnorePointer.
             Positioned(
               right: 10,
               bottom: 10,
@@ -392,6 +503,7 @@ class _ListingCover extends StatelessWidget {
             ),
             if (imageUrl != null && imageUrl!.isNotEmpty)
               Image.network(
+                key: ValueKey(imageUrl),
                 imageUrl!,
                 fit: BoxFit.cover,
                 errorBuilder: (_, _, _) => const SizedBox.shrink(),
@@ -436,9 +548,9 @@ class _ListingCover extends StatelessWidget {
                     title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: Colors.white,
-                    ),
+                    style: Theme.of(
+                      context,
+                    ).textTheme.titleMedium?.copyWith(color: Colors.white),
                   ),
                   const SizedBox(height: 4),
                   Text(

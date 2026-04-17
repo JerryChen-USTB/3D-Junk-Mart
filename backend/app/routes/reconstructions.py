@@ -6,6 +6,7 @@ import signal
 import shutil
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 from urllib.parse import quote, urlencode
 
@@ -20,7 +21,7 @@ from backend.app.schemas import (
     ViewerConfigUpdate,
 )
 from backend.app.services.trainer_service_client import TrainerServiceError, get_trainer_service_client
-from shared.config import GS_SERVICE_BASE_URL
+from shared.config import GS_SERVICE_BASE_URL, GS_SERVICE_PUBLIC_BASE_URL
 from shared.task_store import (
     REPO_ROOT,
     STORAGE_ROOT,
@@ -161,19 +162,113 @@ def _validate_uploaded_video(video_path: Path) -> dict[str, object]:
 
 
 def _resolve_seller_id(request: Request, store) -> str:
-    """Best-effort resolution of the current user's seller id.
-
-    Falls back to the demo user if no valid bearer token is present.
-    """
     header = request.headers.get("authorization") or request.headers.get("Authorization")
-    token = None
-    if header and header.lower().startswith("bearer "):
-        token = header.split(" ", 1)[1].strip() or None
-    try:
-        user = store.current_user(token)
-        return user["entity_id"]
-    except Exception:
-        return store.default_user_id()
+    if not header or not header.lower().startswith("bearer "):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Please sign in first.")
+    token = header.split(" ", 1)[1].strip() or None
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Please sign in first.")
+    session = store.session_by_token(token)
+    if session is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired. Please sign in again.")
+    user = store.user_record(session["payload"].get("user_id") or "")
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired. Please sign in again.")
+    return user["entity_id"]
+
+
+def _require_store(request: Request):
+    from backend.app.services.marketplace_store import get_store
+
+    override = request.app.dependency_overrides.get(get_store) if hasattr(request.app, "dependency_overrides") else None
+    if override is not None:
+        return override()
+    return get_store()
+
+
+def _migrate_task_seller(task: dict, store=None) -> dict:
+    if task.get("seller_id"):
+        return task
+
+    if store is None:
+        from backend.app.services.marketplace_store import get_store
+
+        store = get_store()
+    seller_id = None
+    listing_id = task.get("listing_id")
+    if listing_id:
+        listing = store.get_record("listing", listing_id)
+        if listing is not None:
+            seller_id = listing["payload"].get("seller_id")
+
+    if seller_id:
+        return update_task(task["task_id"], seller_id=seller_id)
+    return task
+
+
+def _require_owned_task(request: Request, task_id: str) -> tuple[dict, str]:
+    task = get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found.")
+    store = _require_store(request)
+    task = _migrate_task_seller(task, store)
+    seller_id = _resolve_seller_id(request, store)
+    if task.get("seller_id") != seller_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found.")
+    return task, seller_id
+
+
+def _media_asset(payload: dict | None) -> dict | None:
+    if not isinstance(payload, dict):
+        return None
+    return {
+        "id": payload.get("id") or "",
+        "kind": payload.get("kind") or "image",
+        "url": payload.get("url") or "",
+        "thumbnail_url": payload.get("thumbnail_url") or payload.get("url"),
+        "width": payload.get("width"),
+        "height": payload.get("height"),
+        "mime_type": payload.get("mime_type"),
+        "sort_order": int(payload.get("sort_order") or 0),
+    }
+
+
+async def _store_uploaded_cover(file: UploadFile, *, namespace: str) -> dict[str, object]:
+    content_type = (file.content_type or "").lower()
+    if content_type and not content_type.startswith("image/"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file must be an image.")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded image is empty.")
+    if len(content) > 4 * 1024 * 1024:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cover image must be 4MB or smaller.")
+
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
+        if content_type == "image/png":
+            suffix = ".png"
+        elif content_type == "image/webp":
+            suffix = ".webp"
+        else:
+            suffix = ".jpg"
+    if suffix == ".jpeg":
+        suffix = ".jpg"
+
+    cover_dir = STORAGE_ROOT / "listing_covers"
+    cover_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"{namespace}_{uuid.uuid4().hex[:8]}{suffix}"
+    path = cover_dir / filename
+    path.write_bytes(content)
+    public_url = path_to_storage_url(path)
+    return {
+        "id": f"{namespace}_cover",
+        "kind": "image",
+        "url": public_url,
+        "thumbnail_url": public_url,
+        "mime_type": content_type or None,
+        "sort_order": 0,
+    }
 
 
 def _rewrite_remote_url(url: str | None) -> str | None:
@@ -184,12 +279,34 @@ def _rewrite_remote_url(url: str | None) -> str | None:
     the phone (connected via USB) cannot reach the remote server directly.
     This function rewrites such URLs to ``/proxy/storage/models/.../model.ply``
     so the local backend can proxy the request.
+
+    We match against both GS_SERVICE_BASE_URL and GS_SERVICE_PUBLIC_BASE_URL,
+    and also any URL whose host:port matches the trainer service port
+    (the trainer may be reachable via different IPs).
     """
     if not url:
         return url
-    remote_base = GS_SERVICE_BASE_URL.rstrip("/")
-    if remote_base and url.startswith(remote_base + "/"):
-        return "/proxy" + url[len(remote_base):]
+
+    # Try exact prefix match against known base URLs.
+    for base in (GS_SERVICE_BASE_URL, GS_SERVICE_PUBLIC_BASE_URL):
+        if not base:
+            continue
+        base = base.rstrip("/")
+        if url.startswith(base + "/"):
+            return "/proxy" + url[len(base):]
+
+    # Fallback: match any URL on the same port as the trainer service.
+    # This handles cases where the trainer responds with a different IP
+    # (e.g. public IP vs localhost) but the same port.
+    from urllib.parse import urlparse
+    try:
+        trainer_port = urlparse(GS_SERVICE_BASE_URL).port
+        parsed = urlparse(url)
+        if parsed.scheme in ("http", "https") and parsed.port == trainer_port and trainer_port:
+            return "/proxy" + parsed.path + ("?" + parsed.query if parsed.query else "")
+    except Exception:
+        pass
+
     return url
 
 
@@ -368,6 +485,7 @@ def _serialize_task(request: Request, task: dict) -> ReconstructionTaskResponse:
         viewer_translation_done=bool(task.get("viewer_translation_done", False)),
         viewer_initial_view_done=bool(task.get("viewer_initial_view_done", False)),
         viewer_animation_approved=bool(task.get("viewer_animation_approved", False)),
+        cover_media=_media_asset(task.get("cover_media_json")),
     )
 
 
@@ -680,6 +798,7 @@ async def create_reconstruction(
     price: str = Form(""),
     video: UploadFile = File(...),
 ) -> ReconstructionTaskResponse:
+    seller_id = _resolve_seller_id(request, _require_store(request))
     if not video.filename:
         raise HTTPException(status_code=400, detail="Missing video filename.")
 
@@ -728,6 +847,7 @@ async def create_reconstruction(
             source_filename=video.filename,
             video_path=source_path,
             video_metadata=video_metadata,
+            seller_id=seller_id,
         )
         task.update(_remote_task_changes(task, remote_task))
         create_task(task)
@@ -736,15 +856,25 @@ async def create_reconstruction(
         shutil.rmtree(upload_dir, ignore_errors=True)
 
 
+@router.post("/{task_id}/cover", response_model=ReconstructionTaskResponse)
+async def upload_reconstruction_cover(
+    request: Request,
+    task_id: str,
+    file: UploadFile = File(...),
+) -> ReconstructionTaskResponse:
+    task, _ = _require_owned_task(request, task_id)
+    cover = await _store_uploaded_cover(file, namespace=task_id)
+    updated = update_task(task_id, cover_media_json=cover)
+    return _serialize_task(request, updated)
+
+
 @router.post("/{task_id}/pipeline/start", response_model=ReconstructionTaskResponse)
 async def start_reconstruction_pipeline(
     request: Request,
     task_id: str,
     payload: PipelineStartRequest,
 ) -> ReconstructionTaskResponse:
-    task = get_task(task_id)
-    if task is None:
-        raise HTTPException(status_code=404, detail="Task not found.")
+    task, _ = _require_owned_task(request, task_id)
 
     if task.get("status") not in PIPELINE_STARTABLE_STATUSES:
         raise HTTPException(
@@ -798,9 +928,7 @@ async def start_reconstruction_pipeline(
 
 @router.post("/{task_id}/pipeline/cancel", response_model=ReconstructionTaskResponse)
 async def cancel_reconstruction_pipeline(request: Request, task_id: str) -> ReconstructionTaskResponse:
-    task = get_task(task_id)
-    if task is None:
-        raise HTTPException(status_code=404, detail="Task not found.")
+    task, _ = _require_owned_task(request, task_id)
 
     current_status = task.get("status")
     if current_status == "cancelled":
@@ -822,9 +950,7 @@ async def cancel_reconstruction_pipeline(request: Request, task_id: str) -> Reco
 
 @router.post("/{task_id}/mask-debug", response_model=ReconstructionTaskResponse)
 async def start_mask_debug(request: Request, task_id: str) -> ReconstructionTaskResponse:
-    task = get_task(task_id)
-    if task is None:
-        raise HTTPException(status_code=404, detail="Task not found.")
+    task, _ = _require_owned_task(request, task_id)
 
     current_status = task.get("status")
     if current_status in PIPELINE_ACTIVE_STATUSES:
@@ -861,9 +987,7 @@ async def preview_mask_prompts(
     task_id: str,
     payload: MaskPromptRequest,
 ) -> ReconstructionTaskResponse:
-    task = get_task(task_id)
-    if task is None:
-        raise HTTPException(status_code=404, detail="Task not found.")
+    task, _ = _require_owned_task(request, task_id)
 
     if task.get("status") not in MASK_INTERACTION_STATUSES:
         raise HTTPException(
@@ -890,9 +1014,7 @@ async def preview_mask_prompts(
 
 @router.post("/{task_id}/mask-confirm", response_model=ReconstructionTaskResponse)
 async def confirm_mask_preview(request: Request, task_id: str) -> ReconstructionTaskResponse:
-    task = get_task(task_id)
-    if task is None:
-        raise HTTPException(status_code=404, detail="Task not found.")
+    task, _ = _require_owned_task(request, task_id)
 
     if task.get("status") != "awaiting_mask_confirmation":
         raise HTTPException(
@@ -924,9 +1046,7 @@ async def confirm_mask_preview(request: Request, task_id: str) -> Reconstruction
 
 @router.get("/{task_id}", response_model=ReconstructionTaskResponse)
 async def get_reconstruction(request: Request, task_id: str) -> ReconstructionTaskResponse:
-    task = get_task(task_id)
-    if task is None:
-        raise HTTPException(status_code=404, detail="Task not found.")
+    task, _ = _require_owned_task(request, task_id)
 
     task = _refresh_task_from_remote(task)
 
@@ -938,7 +1058,7 @@ async def get_reconstruction(request: Request, task_id: str) -> ReconstructionTa
     return _serialize_task(request, task)
 
 
-def _ensure_marketplace_listing(request: Request, task: dict) -> str | None:
+def _ensure_marketplace_listing(request: Request, task: dict, *, seller_id: str | None = None) -> str | None:
     """Create or update a marketplace listing for a published task.
 
     Returns the listing_id if a listing was created/updated, else None.
@@ -951,9 +1071,8 @@ def _ensure_marketplace_listing(request: Request, task: dict) -> str | None:
 
     from datetime import datetime, timezone
     import uuid
-    from backend.app.services.marketplace_store import get_store
 
-    store = get_store()
+    store = _require_store(request)
     task_id = task["task_id"]
     listing_id = task.get("listing_id") or f"listing_{uuid.uuid4().hex[:12]}"
 
@@ -963,7 +1082,16 @@ def _ensure_marketplace_listing(request: Request, task: dict) -> str | None:
         return listing_id
 
     now = datetime.now(timezone.utc).isoformat()
-    seller_id = _resolve_seller_id(request, store)
+    seller_id = seller_id or task.get("seller_id")
+    if not seller_id:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Task owner is missing.")
+    seller_record = store.user_record(seller_id)
+    seller_profile = store.profile_record(seller_id)
+    seller_location = None
+    if seller_profile is not None:
+        seller_location = seller_profile["payload"].get("location")
+    if not seller_location and seller_record is not None:
+        seller_location = seller_record["payload"].get("location")
 
     price_str = task.get("price", "0")
     try:
@@ -986,7 +1114,7 @@ def _ensure_marketplace_listing(request: Request, task: dict) -> str | None:
     listing_payload = {
         "id": listing_id,
         "seller_id": seller_id,
-        "category_id": "cat_tech",
+        "category_id": "cat_digital",
         "title": task.get("title") or "3D Listing",
         "subtitle": task.get("description", ""),
         "description": task.get("description", ""),
@@ -995,8 +1123,8 @@ def _ensure_marketplace_listing(request: Request, task: dict) -> str | None:
         "currency": "CNY",
         "status": "live",
         "condition_level": None,
-        "location_city": None,
-        "cover_media_json": None,
+        "location_city": seller_location,
+        "cover_media_json": task.get("cover_media_json"),
         "badges_json": ["3D \u5c55\u793a"],
         "model_url": _rewrite_remote_url(model_rel_url) or model_rel_url,
         "model_ply_url": _rewrite_remote_url(task.get("model_ply_rel_path")),
@@ -1015,17 +1143,17 @@ def _ensure_marketplace_listing(request: Request, task: dict) -> str | None:
     store.upsert_record("listing", listing_id, listing_payload)
 
     # Persist listing_id back to the task if it was missing.
-    if not task.get("listing_id"):
-        update_task(task_id, listing_id=listing_id)
+    task_changes = {"listing_id": listing_id}
+    if not task.get("seller_id"):
+        task_changes["seller_id"] = seller_id
+    update_task(task_id, **task_changes)
 
     return listing_id
 
 
 @router.post("/{task_id}/publish", response_model=ReconstructionTaskResponse)
 async def publish_reconstruction(request: Request, task_id: str) -> ReconstructionTaskResponse:
-    task = get_task(task_id)
-    if task is None:
-        raise HTTPException(status_code=404, detail="Task not found.")
+    task, seller_id = _require_owned_task(request, task_id)
 
     if task.get("status") != "ready":
         raise HTTPException(
@@ -1036,8 +1164,17 @@ async def publish_reconstruction(request: Request, task_id: str) -> Reconstructi
     if not task.get("model_rel_path"):
         raise HTTPException(status_code=400, detail="Task has no generated model.")
 
+    publish_ready_flags = (
+        bool(task.get("viewer_rotation_done")),
+        bool(task.get("viewer_translation_done")),
+        bool(task.get("viewer_initial_view_done")),
+        bool(task.get("viewer_animation_approved")),
+    )
+    if not all(publish_ready_flags):
+        raise HTTPException(status_code=409, detail="Complete all viewer calibration steps before publishing.")
+
     # Create the marketplace listing (idempotent).
-    listing_id = _ensure_marketplace_listing(request, task)
+    listing_id = _ensure_marketplace_listing(request, task, seller_id=seller_id)
 
     updated_task = update_task(
         task_id,
@@ -1056,9 +1193,8 @@ async def update_publish_flow_state(
     task_id: str,
     payload: PublishFlowStateUpdate,
 ) -> ReconstructionTaskResponse:
-    task = get_task(task_id)
-    if task is None:
-        raise HTTPException(status_code=404, detail="Task not found.")
+    task, _ = _require_owned_task(request, task_id)
+
 
     changes = {}
     if payload.viewer_rotation_done is not None:
@@ -1083,6 +1219,9 @@ async def update_viewer_config(
     task_id: str,
     payload: ViewerConfigUpdate,
 ) -> ViewerConfigResponse:
+    # NOTE: The viewer runs inside a WebView and its JavaScript cannot carry
+    # Authorization headers, so this endpoint intentionally skips ownership
+    # checks and only verifies the task exists.
     task = get_task(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found.")
@@ -1123,21 +1262,25 @@ async def list_reconstructions(
     request: Request,
     status: str | None = None,
 ) -> list[ReconstructionTaskResponse]:
+    store = _require_store(request)
+    seller_id = _resolve_seller_id(request, store)
     statuses = None
     if status:
         parsed = {item.strip() for item in status.split(",") if item.strip()}
         if parsed:
             statuses = parsed
 
-    tasks = [_refresh_task_from_remote(task) for task in list_tasks()]
+    tasks = [_refresh_task_from_remote(_migrate_task_seller(task, store)) for task in list_tasks()]
+    tasks = [task for task in tasks if task.get("seller_id") == seller_id]
     if statuses is not None:
         tasks = [task for task in tasks if task.get("status") in statuses]
 
     # Auto-create marketplace listings for tasks published before the sync code.
     for task in tasks:
-        _ensure_marketplace_listing(request, task)
+        _ensure_marketplace_listing(request, task, seller_id=seller_id)
     # Re-read tasks to pick up any listing_id written back.
-    tasks = list_tasks()
+    tasks = [_migrate_task_seller(task, store) for task in list_tasks()]
+    tasks = [task for task in tasks if task.get("seller_id") == seller_id]
     if statuses is not None:
         tasks = [task for task in tasks if task.get("status") in statuses]
 
@@ -1145,10 +1288,8 @@ async def list_reconstructions(
 
 
 @router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_reconstruction(task_id: str) -> Response:
-    task = get_task(task_id)
-    if task is None:
-        raise HTTPException(status_code=404, detail="Task not found.")
+async def delete_reconstruction(request: Request, task_id: str) -> Response:
+    task, _ = _require_owned_task(request, task_id)
 
     if task.get("status") in PIPELINE_CANCELABLE_STATUSES:
         raise HTTPException(

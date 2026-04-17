@@ -6,11 +6,15 @@ class ListingSummary {
     required this.title,
     required this.subtitle,
     required this.priceLabel,
+    required this.priceMinor,
+    required this.currency,
     required this.originalPriceLabel,
     required this.location,
     required this.badges,
     required this.coverImageUrl,
+    required this.sellerId,
     required this.sellerName,
+    required this.sellerAvatarUrl,
     required this.status,
     this.viewerUrl,
   });
@@ -19,43 +23,55 @@ class ListingSummary {
   final String title;
   final String subtitle;
   final String priceLabel;
+  final int priceMinor;
+  final String currency;
   final String originalPriceLabel;
   final String location;
   final List<String> badges;
   final String? coverImageUrl;
+  final String sellerId;
   final String sellerName;
+  final String? sellerAvatarUrl;
   final String status;
   final String? viewerUrl;
 
-  bool get has3dBadge => badges.any(
-        (badge) => badge.toLowerCase().contains('3d'),
-      );
+  bool get has3dBadge =>
+      badges.any((badge) => badge.toLowerCase().contains('3d'));
 
   factory ListingSummary.fromJson(Map<String, dynamic> json, Uri apiRoot) {
-    final coverMedia = (json['cover_media'] as Map?)?.cast<String, dynamic>() ??
+    final coverMedia =
+        (json['cover_media'] as Map?)?.cast<String, dynamic>() ??
         const <String, dynamic>{};
-    final seller = (json['seller'] as Map?)?.cast<String, dynamic>() ??
+    final seller =
+        (json['seller'] as Map?)?.cast<String, dynamic>() ??
         const <String, dynamic>{};
 
     return ListingSummary(
       id: json['id']?.toString() ?? '',
-      title: json['title']?.toString() ?? 'Untitled listing',
+      title: json['title']?.toString() ?? '未命名商品',
       subtitle: json['subtitle']?.toString() ?? '',
       priceLabel: formatMoney(json['price']),
+      priceMinor: _moneyAmountMinor(json['price']),
+      currency: _moneyCurrency(json['price']),
       originalPriceLabel: formatMoney(json['original_price']),
-      location: json['location']?.toString() ?? 'Unknown location',
+      location:
+          _firstNonEmptyString(<Object?>[
+            json['location'],
+            json['location_city'],
+            seller['location'],
+          ]) ??
+          '未知地区',
       badges: _readStringList(json['badges']),
       coverImageUrl: _resolveUrl(
         coverMedia['thumbnail_url']?.toString() ??
             coverMedia['url']?.toString(),
         apiRoot,
       ),
-      sellerName: seller['display_name']?.toString() ?? 'Marketplace seller',
+      sellerId: seller['id']?.toString() ?? '',
+      sellerName: seller['display_name']?.toString() ?? '卖家',
+      sellerAvatarUrl: _resolveUrl(seller['avatar_url']?.toString(), apiRoot),
       status: json['status']?.toString() ?? 'unknown',
-      viewerUrl: _resolveUrl(
-        json['viewer_url']?.toString(),
-        apiRoot,
-      ),
+      viewerUrl: _resolveUrl(json['viewer_url']?.toString(), apiRoot),
     );
   }
 }
@@ -82,24 +98,34 @@ class ListingDetail {
   final List<ListingAction> actions;
 
   factory ListingDetail.fromJson(Map<String, dynamic> json, Uri apiRoot) {
-    final resources = (json['resources'] as Map?)?.cast<String, dynamic>() ??
+    final resources =
+        (json['resources'] as Map?)?.cast<String, dynamic>() ??
         const <String, dynamic>{};
-    final listing = (resources['listing'] as Map?)?.cast<String, dynamic>() ??
+    final listing =
+        (resources['listing'] as Map?)?.cast<String, dynamic>() ??
         const <String, dynamic>{};
-    final seller = (resources['seller'] as Map?)?.cast<String, dynamic>() ??
+    final seller =
+        (resources['seller'] as Map?)?.cast<String, dynamic>() ??
         (listing['seller'] as Map?)?.cast<String, dynamic>() ??
         const <String, dynamic>{};
     final payload =
         (resources['listing_payload'] as Map?)?.cast<String, dynamic>() ??
-            const <String, dynamic>{};
+        const <String, dynamic>{};
 
     return ListingDetail(
       summary: ListingSummary.fromJson(listing, apiRoot),
-      description: payload['description']?.toString() ??
+      description:
+          payload['description']?.toString() ??
           listing['subtitle']?.toString() ??
-          'No description yet.',
-      sellerBio: seller['bio']?.toString() ?? 'This seller has not added a bio yet.',
-      sellerLocation: seller['location']?.toString() ?? 'Unknown location',
+          '暂无商品描述。',
+      sellerBio: seller['bio']?.toString() ?? '卖家暂未填写简介。',
+      sellerLocation:
+          _firstNonEmptyString(<Object?>[
+            seller['location'],
+            listing['location'],
+            listing['location_city'],
+          ]) ??
+          '未知地区',
       sellerScore: (seller['sesame_credit_score'] as num?)?.toInt(),
       preview3d: ListingPreview3d.fromJson(
         (resources['preview_3d'] as Map?)?.cast<String, dynamic>() ??
@@ -155,19 +181,18 @@ class ListingPreview3d {
     final modelUri = Uri.parse(modelUrl!);
     final viewerUri = modelUri.replace(
       path: '/viewer/index.html',
-      queryParameters: <String, String>{
-        'model': modelUrl!,
-      },
+      queryParameters: <String, String>{'model': modelUrl!},
     );
     return viewerUri.toString();
   }
 
   factory ListingPreview3d.fromJson(Map<String, dynamic> json, Uri apiRoot) {
-    final coverMedia = (json['cover_media'] as Map?)?.cast<String, dynamic>() ??
+    final coverMedia =
+        (json['cover_media'] as Map?)?.cast<String, dynamic>() ??
         const <String, dynamic>{};
     final placeholder =
         (json['placeholder'] as Map?)?.cast<String, dynamic>() ??
-            const <String, dynamic>{};
+        const <String, dynamic>{};
 
     return ListingPreview3d(
       previewStatus: json['preview_status']?.toString() ?? 'pending',
@@ -181,12 +206,12 @@ class ListingPreview3d {
         apiRoot,
       ),
       coverImageUrl: _resolveUrl(
-        coverMedia['thumbnail_url']?.toString() ?? coverMedia['url']?.toString(),
+        coverMedia['thumbnail_url']?.toString() ??
+            coverMedia['url']?.toString(),
         apiRoot,
       ),
-      placeholderTitle: placeholder['title']?.toString() ?? '3D product preview',
-      placeholderSubtitle:
-          placeholder['subtitle']?.toString() ?? 'The 3D preview is not ready yet.',
+      placeholderTitle: placeholder['title']?.toString() ?? '3D 商品预览',
+      placeholderSubtitle: placeholder['subtitle']?.toString() ?? '3D 模型暂未就绪。',
       placeholderBadges: _readStringList(placeholder['badges']),
     );
   }
@@ -200,7 +225,7 @@ class ListingSpec {
 
   factory ListingSpec.fromJson(Map<String, dynamic> json) {
     return ListingSpec(
-      label: json['spec_key']?.toString() ?? 'Spec',
+      label: json['spec_key']?.toString() ?? '参数',
       value: json['spec_value']?.toString() ?? '-',
     );
   }
@@ -233,6 +258,16 @@ String? _resolveUrl(String? raw, Uri apiRoot) {
   return apiRoot.resolve(raw).toString();
 }
 
+String? _firstNonEmptyString(List<Object?> values) {
+  for (final value in values) {
+    final text = value?.toString().trim() ?? '';
+    if (text.isNotEmpty) {
+      return text;
+    }
+  }
+  return null;
+}
+
 List<String> _readStringList(Object? raw) {
   if (raw is! List) {
     return const <String>[];
@@ -242,25 +277,42 @@ List<String> _readStringList(Object? raw) {
 
 String formatMoney(Object? rawPrice) {
   if (rawPrice is! Map) {
-    return 'Negotiable';
+    return '面议';
   }
 
   final price = rawPrice.cast<String, dynamic>();
   final currency = price['currency']?.toString() ?? '';
   final amountMinor = (price['amount_minor'] as num?)?.toInt();
   if (amountMinor == null) {
-    return 'Negotiable';
+    return '面议';
   }
 
   final symbol = switch (currency.toUpperCase()) {
-    'CNY' => '¥',
+    'CNY' => '￥',
     'USD' => '\$',
     'EUR' => '€',
     _ => '${currency.toUpperCase()} ',
   };
   final amount = amountMinor / 100;
-  final formatted = amount % 1 == 0 ? amount.toStringAsFixed(0) : amount.toStringAsFixed(2);
+  final formatted = amount % 1 == 0
+      ? amount.toStringAsFixed(0)
+      : amount.toStringAsFixed(2);
   return '$symbol$formatted';
+}
+
+int _moneyAmountMinor(Object? rawPrice) {
+  if (rawPrice is! Map) {
+    return 0;
+  }
+  return (rawPrice['amount_minor'] as num?)?.toInt() ?? 0;
+}
+
+String _moneyCurrency(Object? rawPrice) {
+  if (rawPrice is! Map) {
+    return 'CNY';
+  }
+  final currency = rawPrice['currency']?.toString().trim() ?? '';
+  return currency.isEmpty ? 'CNY' : currency;
 }
 
 double adaptiveGridCardWidth(double maxWidth) {

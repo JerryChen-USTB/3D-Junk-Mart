@@ -133,6 +133,7 @@ def build_task_record(
         "error_message": None,
         "source_filename": source_filename,
         "video_rel_path": path_to_storage_url(video_path),
+        "cover_media_json": None,
         "processed_rel_path": None,
         "model_rel_path": None,
         "model_ply_rel_path": None,

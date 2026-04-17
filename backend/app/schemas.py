@@ -134,6 +134,7 @@ class AuthSession(BaseModel):
     device_platform: str | None = None
     is_new_user: bool = False
     refresh_token: str | None = None
+    guest_mode: bool = False
 
 
 class AuthResponse(BaseModel):
@@ -407,7 +408,7 @@ class HealthPayload(BaseModel):
     status: str = 'ok'
     version: str
     database_ready: bool = True
-    demo_user_id: str
+    demo_user_id: str | None = None
     seeded_users: int
     seeded_listings: int
 
@@ -453,6 +454,26 @@ class LogoutRequest(BaseModel):
     access_token: str | None = None
 
 
+class ConversationCreateRequest(BaseModel):
+    listing_id: str
+    content_text: str | None = None
+
+
+class OrderCreateRequest(BaseModel):
+    listing_id: str
+    address_id: str
+
+
+class OrderShipRequest(BaseModel):
+    carrier_name: str
+    tracking_no: str
+    estimated_delivery_at: str | None = None
+
+
+class OrderDisputeRequest(BaseModel):
+    reason: str = ''
+
+
 class UploadPresignRequest(BaseModel):
     filename: str
     content_type: str | None = None
@@ -492,6 +513,18 @@ class ListingDraftUpdateRequest(BaseModel):
     condition_level: str | None = None
     location_city: str | None = None
     draft_payload_json: dict[str, Any] | None = None
+
+
+class ListingUpdateRequest(BaseModel):
+    title: str | None = None
+    subtitle: str | None = None
+    description: str | None = None
+    price_minor: int | None = None
+    original_price_minor: int | None = None
+    currency: str | None = None
+    condition_level: str | None = None
+    location_city: str | None = None
+    cover_media_json: dict[str, Any] | None = None
 
 
 class SendMessageRequest(BaseModel):
@@ -598,6 +631,7 @@ class ReconstructionTaskResponse(BaseModel):
     viewer_translation_done: bool = False
     viewer_initial_view_done: bool = False
     viewer_animation_approved: bool = False
+    cover_media: MediaAsset | None = None
 
 
 class PipelineStartRequest(BaseModel):

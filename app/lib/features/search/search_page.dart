@@ -23,212 +23,168 @@ class SearchPage extends StatefulWidget {
 }
 
 class _SearchPageState extends State<SearchPage> {
-  final TextEditingController _queryController = TextEditingController(text: '3D');
-  late Future<List<ListingSummary>> _listingsFuture;
+  final TextEditingController _queryController = TextEditingController();
+  final ListingPreviewController _previewController = ListingPreviewController();
+  List<ListingSummary> _results = const <ListingSummary>[];
+  bool _loading = true;
+  String? _errorMessage;
+  String _activeQuery = '';
 
   @override
   void initState() {
     super.initState();
-    _listingsFuture = widget.repository.fetchListings(limit: 20);
-    _queryController.addListener(() {
-      setState(() {});
-    });
+    _performSearch(initial: true);
   }
 
   @override
   void dispose() {
+    _previewController.dispose();
     _queryController.dispose();
     super.dispose();
   }
 
-  Future<void> _refresh() async {
-    final future = widget.repository.fetchListings(limit: 20);
-    setState(() {
-      _listingsFuture = future;
-    });
-    await future;
-  }
-
-  List<ListingSummary> _filter(List<ListingSummary> items) {
-    final keyword = _queryController.text.trim().toLowerCase();
-    if (keyword.isEmpty) {
-      return items;
+  Future<void> _performSearch({bool initial = false}) async {
+    if (!initial) {
+      FocusScope.of(context).unfocus();
     }
-    return items.where((listing) {
-      final haystack = [
-        listing.title,
-        listing.subtitle,
-        listing.location,
-        listing.sellerName,
-        ...listing.badges,
-      ].join(' ').toLowerCase();
-      return haystack.contains(keyword);
-    }).toList(growable: false);
+    _previewController.clear();
+    final query = _queryController.text.trim();
+    setState(() {
+      _loading = true;
+      _errorMessage = null;
+      _activeQuery = query;
+    });
+
+    try {
+      final results = await widget.repository.fetchListings(
+        limit: 20,
+        query: query,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _results = results;
+        _loading = false;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _results = const <ListingSummary>[];
+        _loading = false;
+        _errorMessage = initial ? '商品加载失败，请稍后重试。' : '搜索失败，请重试。';
+      });
+      debugPrint('Search failed: $error');
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return SafeArea(
       bottom: false,
-      child: FutureBuilder<List<ListingSummary>>(
-        future: _listingsFuture,
-        builder: (context, snapshot) {
-          final filtered = _filter(snapshot.data ?? const <ListingSummary>[]);
-
-          return RefreshIndicator(
-            onRefresh: _refresh,
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 24, 16, 128),
+      child: RefreshIndicator(
+        onRefresh: () => _performSearch(),
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 24, 16, 128),
+          children: [
+            Row(
               children: [
-                Row(
-                  children: [
-                    EditorialRoundIconButton(
-                      icon: Icons.arrow_back_rounded,
-                      onTap: widget.onGoHome,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Container(
-                        height: 52,
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        decoration: BoxDecoration(
-                          color: AppColors.surface,
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.search_rounded, color: AppColors.textMuted),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: TextField(
-                                controller: _queryController,
-                                decoration: const InputDecoration(
-                                  hintText: 'Search title, seller, location, or 3D tag',
-                                  filled: false,
-                                  contentPadding: EdgeInsets.zero,
-                                  border: InputBorder.none,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    const CircleAvatar(
-                      radius: 21,
-                      backgroundColor: AppColors.surface,
-                      child: Icon(Icons.tune_rounded, color: AppColors.text),
-                    ),
-                  ],
+                EditorialRoundIconButton(
+                  icon: Icons.arrow_back_rounded,
+                  onTap: widget.onGoHome,
                 ),
-                const SizedBox(height: 14),
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: const [
-                      _SearchFilterChip(label: 'All', selected: true),
-                      _SearchFilterChip(label: '3D-ready'),
-                      _SearchFilterChip(label: 'Latest'),
-                      _SearchFilterChip(label: 'Price'),
-                      _SearchFilterChip(
-                        label: 'Filters',
-                        icon: Icons.filter_list_rounded,
-                      ),
-                    ],
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Container(
+                    height: 52,
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.search_rounded,
+                          color: AppColors.textMuted,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: _queryController,
+                            textInputAction: TextInputAction.search,
+                            onSubmitted: (_) => _performSearch(),
+                            decoration: const InputDecoration(
+                              hintText: '搜索商品标题、描述或地区',
+                              filled: false,
+                              border: InputBorder.none,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-                const SizedBox(height: 16),
-                _SearchSummaryCard(
-                  query: _queryController.text.trim().isEmpty
-                      ? 'All listings'
-                      : _queryController.text.trim(),
-                  count: filtered.length,
-                ),
-                const SizedBox(height: 16),
-                EditorialSectionHeader(
-                  title: 'Search results',
-                  actionLabel: '${filtered.length} items',
-                ),
-                const SizedBox(height: 12),
-                if (snapshot.connectionState == ConnectionState.waiting &&
-                    !snapshot.hasData)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 48),
-                    child: Center(child: CircularProgressIndicator()),
-                  )
-                else if (snapshot.hasError && filtered.isEmpty)
-                  _SearchErrorPanel(onRetry: _refresh)
-                else if (filtered.isEmpty)
-                  const _SearchEmptyState()
-                else
-                  LayoutBuilder(
-                    builder: (context, constraints) {
-                      final cardWidth = adaptiveGridCardWidth(constraints.maxWidth);
-                      return Wrap(
-                        spacing: 12,
-                        runSpacing: 12,
-                        children: List<Widget>.generate(filtered.length, (index) {
-                          final listing = filtered[index];
-                          return SizedBox(
-                            width: cardWidth,
-                            child: ListingCard(
-                              listing: listing,
-                              tall: index % 3 == 1,
-                              onTap: () => widget.onOpenListing(listing.id),
-                            ),
-                          );
-                        }),
-                      );
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 104,
+                  height: 52,
+                  child: FilledButton(
+                    onPressed: () {
+                      _performSearch();
                     },
+                    child: const Text('搜索'),
                   ),
+                ),
               ],
             ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _SearchFilterChip extends StatelessWidget {
-  const _SearchFilterChip({
-    required this.label,
-    this.icon,
-    this.selected = false,
-  });
-
-  final String label;
-  final IconData? icon;
-  final bool selected;
-
-  @override
-  Widget build(BuildContext context) {
-    final background = selected ? AppColors.accent : AppColors.surface;
-    final foreground = selected ? AppColors.primary : AppColors.textMuted;
-
-    return Padding(
-      padding: const EdgeInsets.only(right: 10),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        decoration: BoxDecoration(
-          color: background,
-          borderRadius: BorderRadius.circular(999),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (icon != null) ...[
-              Icon(icon, size: 16, color: foreground),
-              const SizedBox(width: 4),
-            ],
-            Text(
-              label,
-              style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: foreground,
-                    fontWeight: FontWeight.w700,
-                  ),
+            const SizedBox(height: 16),
+            _SearchSummaryCard(
+              query: _activeQuery.isEmpty ? '全部商品' : _activeQuery,
+              count: _results.length,
             ),
+            const SizedBox(height: 16),
+            EditorialSectionHeader(
+              title: '搜索结果',
+              actionLabel: '${_results.length} 件',
+            ),
+            const SizedBox(height: 12),
+            if (_loading)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 48),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (_errorMessage != null)
+              _SearchEmptyState(title: '加载失败', message: _errorMessage!)
+            else if (_results.isEmpty)
+              const _SearchEmptyState(
+                title: '没有找到匹配商品',
+                message: '可以尝试更短的关键词，或者返回首页看看最新商品。',
+              )
+            else
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final cardWidth = adaptiveGridCardWidth(constraints.maxWidth);
+                  return Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: List<Widget>.generate(_results.length, (index) {
+                      final listing = _results[index];
+                      return SizedBox(
+                        width: cardWidth,
+                        child: ListingCard(
+                          listing: listing,
+                          tall: index.isOdd,
+                          previewController: _previewController,
+                          onTap: () => widget.onOpenListing(listing.id),
+                        ),
+                      );
+                    }),
+                  );
+                },
+              ),
           ],
         ),
       ),
@@ -274,17 +230,17 @@ class _SearchSummaryCard extends StatelessWidget {
               children: [
                 Text(
                   query,
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        color: Colors.white,
-                      ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(color: Colors.white),
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Found $count matching listings across titles, sellers, locations, and 3D tags.',
+                  '当前市场里共有 $count 件匹配商品。',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Colors.white70,
-                        height: 1.4,
-                      ),
+                    color: Colors.white70,
+                    height: 1.4,
+                  ),
                 ),
               ],
             ),
@@ -296,7 +252,10 @@ class _SearchSummaryCard extends StatelessWidget {
 }
 
 class _SearchEmptyState extends StatelessWidget {
-  const _SearchEmptyState();
+  const _SearchEmptyState({required this.title, required this.message});
+
+  final String title;
+  final String message;
 
   @override
   Widget build(BuildContext context) {
@@ -308,47 +267,19 @@ class _SearchEmptyState extends StatelessWidget {
       ),
       child: Column(
         children: [
-          const Icon(Icons.search_off_rounded, size: 44, color: AppColors.textMuted),
+          const Icon(
+            Icons.search_off_rounded,
+            size: 44,
+            color: AppColors.textMuted,
+          ),
           const SizedBox(height: 12),
-          Text('No matching listings', style: Theme.of(context).textTheme.titleMedium),
+          Text(title, style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 6),
           Text(
-            'Try a shorter keyword, or search for 3D to focus on visualized items.',
+            message,
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodySmall,
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SearchErrorPanel extends StatelessWidget {
-  const _SearchErrorPanel({required this.onRetry});
-
-  final Future<void> Function() onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(24),
-      ),
-      child: Column(
-        children: [
-          const Icon(Icons.cloud_off_rounded, size: 44, color: AppColors.coral),
-          const SizedBox(height: 12),
-          Text('Search failed to load', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 6),
-          Text(
-            'Try again in a moment, or return to the home feed.',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-          const SizedBox(height: 12),
-          FilledButton(onPressed: onRetry, child: const Text('Reload')),
         ],
       ),
     );

@@ -1,0 +1,7 @@
+[Unit]
+Description=Check 3DGS marketplace runtime health
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/3dgs-marketplace/repo
+ExecStart=/opt/3dgs-marketplace/repo/backend/.venv/bin/python /opt/3dgs-marketplace/repo/deploy/scripts/check_runtime_health.py

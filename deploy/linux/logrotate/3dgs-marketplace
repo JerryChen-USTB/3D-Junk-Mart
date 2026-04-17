@@ -1,0 +1,9 @@
+/var/log/3dgs-marketplace/backend.log
+/var/log/3dgs-marketplace/trainer.log {
+    rotate 14
+    daily
+    compress
+    missingok
+    notifempty
+    copytruncate
+}

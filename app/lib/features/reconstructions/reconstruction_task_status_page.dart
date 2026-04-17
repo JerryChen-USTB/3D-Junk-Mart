@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -46,6 +48,14 @@ class _ReconstructionTaskStatusPageState
   String? _errorMessage;
   final List<MaskPromptPoint> _points = <MaskPromptPoint>[];
 
+  // ── Preloading state ──
+  String? _preloadingManifestUrl;
+  Directory? _preloadCacheDir;
+  Map<String, String> _localPreviewFiles = const {};
+  bool _isPreloading = false;
+  int _preloadedCount = 0;
+  int _preloadTotal = 0;
+
   @override
   void initState() {
     super.initState();
@@ -61,7 +71,104 @@ class _ReconstructionTaskStatusPageState
   @override
   void dispose() {
     _timer?.cancel();
+    unawaited(_clearPreloadCache());
     super.dispose();
+  }
+
+  Future<void> _clearPreloadCache() async {
+    _preloadingManifestUrl = null;
+    final cacheDir = _preloadCacheDir;
+    _preloadCacheDir = null;
+    _localPreviewFiles = const {};
+    _isPreloading = false;
+    _preloadedCount = 0;
+    _preloadTotal = 0;
+    if (cacheDir != null) {
+      try {
+        if (await cacheDir.exists()) {
+          await cacheDir.delete(recursive: true);
+        }
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _preloadFrames(
+    MaskPreviewManifest manifest,
+    String manifestUrl,
+  ) async {
+    if (_preloadingManifestUrl == manifestUrl) return;
+    await _clearPreloadCache();
+
+    final cacheDir = await Directory(
+      '${Directory.systemTemp.path}${Platform.pathSeparator}mask_preview_${_task.taskId}_${DateTime.now().microsecondsSinceEpoch}',
+    ).create(recursive: true);
+
+    final assets = <({String url, String localPath})>[];
+    for (final frame in manifest.frames) {
+      if (frame.imageUrl.isNotEmpty) {
+        assets.add((
+          url: frame.imageUrl,
+          localPath:
+              '${cacheDir.path}${Platform.pathSeparator}raw_${frame.index.toString().padLeft(5, '0')}.jpg',
+        ));
+      }
+      if (frame.previewUrl.isNotEmpty) {
+        assets.add((
+          url: frame.previewUrl,
+          localPath:
+              '${cacheDir.path}${Platform.pathSeparator}preview_${frame.index.toString().padLeft(5, '0')}.jpg',
+        ));
+      }
+    }
+
+    if (!mounted) {
+      await _clearPreloadCache();
+      return;
+    }
+
+    setState(() {
+      _preloadingManifestUrl = manifestUrl;
+      _preloadCacheDir = cacheDir;
+      _localPreviewFiles = const {};
+      _isPreloading = true;
+      _preloadedCount = 0;
+      _preloadTotal = assets.length;
+    });
+
+    const batchSize = 4;
+    for (var offset = 0; offset < assets.length; offset += batchSize) {
+      if (_preloadingManifestUrl != manifestUrl) return;
+      final batch = assets.sublist(
+        offset,
+        math.min(offset + batchSize, assets.length),
+      );
+
+      final downloaded = <({String url, String localPath})>[];
+      await Future.wait(
+        batch.map((asset) async {
+          try {
+            await widget.repository.downloadFile(asset.url, asset.localPath);
+            downloaded.add(asset);
+          } catch (_) {}
+        }),
+      );
+
+      if (!mounted || _preloadingManifestUrl != manifestUrl) return;
+
+      setState(() {
+        final next = Map<String, String>.from(_localPreviewFiles);
+        for (final asset in downloaded) {
+          next[asset.url] = asset.localPath;
+        }
+        _localPreviewFiles = next;
+        _preloadedCount += downloaded.length;
+      });
+    }
+
+    if (!mounted || _preloadingManifestUrl != manifestUrl) return;
+    setState(() {
+      _isPreloading = false;
+    });
   }
 
   void _syncPolling() {
@@ -108,6 +215,7 @@ class _ReconstructionTaskStatusPageState
         _selectedFrameIndex = manifest.promptFrameIndex;
         _showPreview = true;
       });
+      unawaited(_preloadFrames(manifest, manifestUrl));
     } catch (error) {
       if (!mounted) {
         return;
@@ -368,7 +476,7 @@ class _ReconstructionTaskStatusPageState
     await _refreshTask();
   }
 
-  void _addMaskPoint(TapDownDetails details, BoxConstraints constraints) {
+  void _addMaskPoint(TapDownDetails details, Rect imageRect) {
     if (!_task.needsMaskInteraction ||
         _task.maskPromptFrameUrl == null ||
         (_maskManifest != null &&
@@ -376,11 +484,13 @@ class _ReconstructionTaskStatusPageState
             _showPreview)) {
       return;
     }
-    final x = (details.localPosition.dx / constraints.maxWidth).clamp(0.0, 1.0);
-    final y = (details.localPosition.dy / constraints.maxHeight).clamp(
-      0.0,
-      1.0,
-    );
+    if (!imageRect.contains(details.localPosition)) {
+      return;
+    }
+    final x = ((details.localPosition.dx - imageRect.left) / imageRect.width)
+        .clamp(0.0, 1.0);
+    final y = ((details.localPosition.dy - imageRect.top) / imageRect.height)
+        .clamp(0.0, 1.0);
     setState(() {
       _points.add(MaskPromptPoint(x: x, y: y, label: _negativeMode ? 0 : 1));
     });
@@ -468,7 +578,7 @@ class _ReconstructionTaskStatusPageState
             if (_task.canDebugMasking && !_task.needsMaskInteraction) ...[
               const SizedBox(height: 12),
               _ActionCard(
-                title: '复用 COLMAP 结果调试 Mask',
+                title: '复用 COLMAP 结果调试抠图',
                 subtitle: '跳回首帧标注页，重新点选主体和背景，不再重跑预处理。',
                 actionLabel: _isStartingMaskDebug ? '进入中...' : '开始调试',
                 onPressed: _isStartingMaskDebug ? null : _startMaskDebug,
@@ -481,6 +591,10 @@ class _ReconstructionTaskStatusPageState
                 task: _task,
                 manifest: _maskManifest,
                 currentImageUrl: _currentMaskImageUrl(),
+                localPreviewFiles: _localPreviewFiles,
+                isPreloading: _isPreloading,
+                preloadedCount: _preloadedCount,
+                preloadTotal: _preloadTotal,
                 points: _points,
                 negativeMode: _negativeMode,
                 selectedFrameIndex: _selectedFrameIndex,
@@ -658,10 +772,10 @@ class _TrainingSettingsCard extends StatelessWidget {
               initialValue: selectedQualityProfile,
               decoration: const InputDecoration(labelText: '质量档位'),
               items: const [
-                DropdownMenuItem(value: 'fast', child: Text('Fast')),
-                DropdownMenuItem(value: 'balanced', child: Text('Balanced')),
-                DropdownMenuItem(value: 'quality', child: Text('Quality')),
-                DropdownMenuItem(value: 'raw', child: Text('Raw')),
+                DropdownMenuItem(value: 'fast', child: Text('快速')),
+                DropdownMenuItem(value: 'balanced', child: Text('均衡')),
+                DropdownMenuItem(value: 'quality', child: Text('高质量')),
+                DropdownMenuItem(value: 'raw', child: Text('原始模式')),
               ],
               onChanged: isStarting
                   ? null
@@ -693,7 +807,7 @@ class _TrainingSettingsCard extends StatelessWidget {
             SwitchListTile(
               value: objectMasking,
               onChanged: isStarting ? null : onObjectMaskingChanged,
-              title: const Text('Object Masking'),
+              title: const Text('主体抠图'),
               subtitle: const Text('在 COLMAP 完成后暂停，进入首帧标注和全帧预览确认。'),
               contentPadding: EdgeInsets.zero,
             ),
@@ -758,11 +872,15 @@ class _ActionCard extends StatelessWidget {
   }
 }
 
-class _MaskPromptCard extends StatelessWidget {
+class _MaskPromptCard extends StatefulWidget {
   const _MaskPromptCard({
     required this.task,
     required this.manifest,
     required this.currentImageUrl,
+    required this.localPreviewFiles,
+    required this.isPreloading,
+    required this.preloadedCount,
+    required this.preloadTotal,
     required this.points,
     required this.negativeMode,
     required this.selectedFrameIndex,
@@ -784,6 +902,10 @@ class _MaskPromptCard extends StatelessWidget {
   final ReconstructionTask task;
   final MaskPreviewManifest? manifest;
   final String? currentImageUrl;
+  final Map<String, String> localPreviewFiles;
+  final bool isPreloading;
+  final int preloadedCount;
+  final int preloadTotal;
   final List<MaskPromptPoint> points;
   final bool negativeMode;
   final int selectedFrameIndex;
@@ -792,8 +914,7 @@ class _MaskPromptCard extends StatelessWidget {
   final bool isGeneratingPreview;
   final bool isConfirming;
   final bool showPointOverlay;
-  final void Function(TapDownDetails details, BoxConstraints constraints)
-  onTapImage;
+  final void Function(TapDownDetails details, Rect imageRect) onTapImage;
   final ValueChanged<bool> onNegativeModeChanged;
   final ValueChanged<bool> onShowPreviewChanged;
   final ValueChanged<int> onFrameChanged;
@@ -803,55 +924,236 @@ class _MaskPromptCard extends StatelessWidget {
   final VoidCallback onConfirm;
 
   @override
+  State<_MaskPromptCard> createState() => _MaskPromptCardState();
+}
+
+class _MaskPromptCardState extends State<_MaskPromptCard> {
+  double? _resolvedAspectRatio;
+  ImageStream? _imageStream;
+  ImageStreamListener? _imageStreamListener;
+
+  @override
+  void initState() {
+    super.initState();
+    _syncResolvedAspectRatio();
+  }
+
+  @override
+  void didUpdateWidget(covariant _MaskPromptCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final oldLocalPath = _localPathFor(oldWidget);
+    final newLocalPath = _localPathFor(widget);
+    if (oldWidget.currentImageUrl != widget.currentImageUrl ||
+        oldLocalPath != newLocalPath) {
+      _syncResolvedAspectRatio();
+    }
+  }
+
+  @override
+  void dispose() {
+    _detachImageListener();
+    super.dispose();
+  }
+
+  String? _localPathFor(_MaskPromptCard card) {
+    final currentImageUrl = card.currentImageUrl;
+    if (currentImageUrl == null || currentImageUrl.isEmpty) {
+      return null;
+    }
+    return card.localPreviewFiles[currentImageUrl];
+  }
+
+  double get _fallbackAspectRatio {
+    final m = widget.manifest;
+    if (m != null && m.frameWidth > 0 && m.frameHeight > 0) {
+      return m.frameWidth / m.frameHeight;
+    }
+    final w = widget.task.maskPromptFrameWidth;
+    final h = widget.task.maskPromptFrameHeight;
+    if (w != null && h != null && w > 0 && h > 0) {
+      return w / h;
+    }
+    return 4 / 3;
+  }
+
+  double get _effectiveAspectRatio =>
+      (_resolvedAspectRatio != null && _resolvedAspectRatio! > 0)
+      ? _resolvedAspectRatio!
+      : _fallbackAspectRatio;
+
+  void _detachImageListener() {
+    final stream = _imageStream;
+    final listener = _imageStreamListener;
+    if (stream != null && listener != null) {
+      stream.removeListener(listener);
+    }
+    _imageStream = null;
+    _imageStreamListener = null;
+  }
+
+  void _syncResolvedAspectRatio() {
+    _detachImageListener();
+    final provider = _imageProvider();
+    if (provider == null) {
+      if (_resolvedAspectRatio != null && mounted) {
+        setState(() {
+          _resolvedAspectRatio = null;
+        });
+      }
+      return;
+    }
+
+    final stream = provider.resolve(const ImageConfiguration());
+    final listener = ImageStreamListener(
+      (ImageInfo info, bool _) {
+        final image = info.image;
+        if (image.width <= 0 || image.height <= 0 || !mounted) {
+          return;
+        }
+        final ratio = image.width / image.height;
+        if (_resolvedAspectRatio == ratio) {
+          return;
+        }
+        setState(() {
+          _resolvedAspectRatio = ratio;
+        });
+      },
+      onError: (_, __) {
+        if (!mounted || _resolvedAspectRatio == null) {
+          return;
+        }
+        setState(() {
+          _resolvedAspectRatio = null;
+        });
+      },
+    );
+    _imageStream = stream;
+    _imageStreamListener = listener;
+    stream.addListener(listener);
+  }
+
+  ImageProvider<Object>? _imageProvider() {
+    final currentImageUrl = widget.currentImageUrl;
+    final localPath = _localPathFor(widget);
+    if (localPath != null && localPath.isNotEmpty) {
+      return FileImage(File(localPath));
+    }
+    if (currentImageUrl != null && currentImageUrl.isNotEmpty) {
+      return NetworkImage(currentImageUrl);
+    }
+    return null;
+  }
+
+  double _pointLeft(MaskPromptPoint point, Rect imageRect) {
+    return imageRect.left + point.x * imageRect.width - 8;
+  }
+
+  double _pointTop(MaskPromptPoint point, Rect imageRect) {
+    return imageRect.top + point.y * imageRect.height - 8;
+  }
+
+  double get _aspectRatio {
+    return _effectiveAspectRatio;
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final task = widget.task;
+    final manifest = widget.manifest;
+    final currentImageUrl = widget.currentImageUrl;
+    final localPreviewFiles = widget.localPreviewFiles;
     final frameCount = manifest?.frames.length ?? 0;
+    final localPath = currentImageUrl == null
+        ? null
+        : localPreviewFiles[currentImageUrl];
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Mask 标注与确认', style: Theme.of(context).textTheme.titleLarge),
+            Text('抠图标注与确认', style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 8),
             Text(
               task.isAwaitingMaskConfirmation
                   ? '检查自动生成的全帧预览，如果轮廓合适就确认继续训练。'
                   : '在首帧上点选主体和背景，然后生成全帧 Mask 预览。',
             ),
+            if (widget.isPreloading || widget.preloadedCount > 0) ...[
+              const SizedBox(height: 8),
+              Text(
+                widget.preloadTotal > 0
+                    ? '本地预加载：${widget.preloadedCount} / ${widget.preloadTotal}'
+                    : '正在准备本地预加载...',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: AppColors.textMuted),
+              ),
+            ],
             const SizedBox(height: 12),
             AspectRatio(
-              aspectRatio: (task.maskPromptFrameWidth != null &&
-                          task.maskPromptFrameHeight != null &&
-                          task.maskPromptFrameHeight! > 0)
-                  ? task.maskPromptFrameWidth! / task.maskPromptFrameHeight!
-                  : 4 / 3,
-              child: Container(
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceSoft,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                clipBehavior: Clip.antiAlias,
-                child: currentImageUrl == null
-                    ? const Center(child: Text('等待首帧预览图'))
-                    : LayoutBuilder(
+              aspectRatio: _aspectRatio,
+              child: currentImageUrl == null
+                  ? Container(
+                      decoration: BoxDecoration(
+                        color: AppColors.surfaceSoft,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: const Center(child: Text('等待首帧预览图')),
+                    )
+                  : ClipRRect(
+                      borderRadius: BorderRadius.circular(20),
+                      child: LayoutBuilder(
                         builder: (context, constraints) {
+                          final imageRect = _fittedImageRect(
+                            Size(
+                              constraints.maxWidth,
+                              constraints.maxHeight,
+                            ),
+                            _aspectRatio,
+                          );
                           return GestureDetector(
                             onTapDown: (details) =>
-                                onTapImage(details, constraints),
+                                widget.onTapImage(details, imageRect),
                             child: Stack(
                               fit: StackFit.expand,
                               children: [
-                                Image.network(
-                                  currentImageUrl!,
-                                  fit: BoxFit.contain,
-                                  errorBuilder: (context, error, stackTrace) =>
-                                      const Center(child: Text('预览图加载失败')),
-                                ),
-                                if (showPointOverlay)
-                                  for (final point in points)
+                                const ColoredBox(color: Colors.black),
+                                if (localPath != null)
+                                  Positioned.fromRect(
+                                    rect: imageRect,
+                                    child: Image.file(
+                                      File(localPath),
+                                      fit: BoxFit.contain,
+                                      gaplessPlayback: true,
+                                      errorBuilder:
+                                          (context, error, stackTrace) =>
+                                            Image.network(
+                                              currentImageUrl,
+                                              fit: BoxFit.contain,
+                                              gaplessPlayback: true,
+                                            ),
+                                    ),
+                                  )
+                                else
+                                  Positioned.fromRect(
+                                    rect: imageRect,
+                                    child: Image.network(
+                                      currentImageUrl,
+                                      fit: BoxFit.contain,
+                                      gaplessPlayback: true,
+                                      errorBuilder:
+                                          (context, error, stackTrace) =>
+                                              const Center(
+                                                child: Text('预览图加载失败'),
+                                              ),
+                                    ),
+                                  ),
+                                if (widget.showPointOverlay)
+                                  for (final point in widget.points)
                                     Positioned(
-                                      left: point.x * constraints.maxWidth - 8,
-                                      top: point.y * constraints.maxHeight - 8,
+                                      left: _pointLeft(point, imageRect),
+                                      top: _pointTop(point, imageRect),
                                       child: Container(
                                         width: 16,
                                         height: 16,
@@ -867,7 +1169,7 @@ class _MaskPromptCard extends StatelessWidget {
                                         ),
                                       ),
                                     ),
-                                if (isLoadingManifest)
+                                if (widget.isLoadingManifest)
                                   const Align(
                                     alignment: Alignment.topCenter,
                                     child: LinearProgressIndicator(),
@@ -877,28 +1179,28 @@ class _MaskPromptCard extends StatelessWidget {
                           );
                         },
                       ),
-              ),
+                    ),
             ),
             const SizedBox(height: 12),
             if (frameCount > 0) ...[
-              Text('预览帧 ${selectedFrameIndex + 1} / $frameCount'),
+              Text('预览帧 ${widget.selectedFrameIndex + 1} / $frameCount'),
               Slider(
-                value: selectedFrameIndex.toDouble(),
+                value: widget.selectedFrameIndex.toDouble(),
                 min: 0,
                 max: (frameCount - 1).toDouble(),
                 divisions: frameCount > 1 ? frameCount - 1 : 1,
-                onChanged: (value) => onFrameChanged(value.round()),
+                onChanged: (value) => widget.onFrameChanged(value.round()),
               ),
               SwitchListTile(
-                value: showPreview,
-                onChanged: onShowPreviewChanged,
+                value: widget.showPreview,
+                onChanged: widget.onShowPreviewChanged,
                 contentPadding: EdgeInsets.zero,
                 title: const Text('显示分割预览'),
               ),
             ],
             SwitchListTile(
-              value: negativeMode,
-              onChanged: onNegativeModeChanged,
+              value: widget.negativeMode,
+              onChanged: widget.onNegativeModeChanged,
               contentPadding: EdgeInsets.zero,
               title: const Text('负样本模式'),
               subtitle: const Text('关闭时点主体，开启时点背景或不应保留的区域。'),
@@ -909,12 +1211,12 @@ class _MaskPromptCard extends StatelessWidget {
               runSpacing: 12,
               children: [
                 OutlinedButton.icon(
-                  onPressed: onUndo,
+                  onPressed: widget.onUndo,
                   icon: const Icon(Icons.undo_rounded),
                   label: const Text('撤销'),
                 ),
                 OutlinedButton.icon(
-                  onPressed: onClear,
+                  onPressed: widget.onClear,
                   icon: const Icon(Icons.delete_outline_rounded),
                   label: const Text('清空'),
                 ),
@@ -926,28 +1228,28 @@ class _MaskPromptCard extends StatelessWidget {
               runSpacing: 12,
               children: [
                 FilledButton.icon(
-                  onPressed: isGeneratingPreview ? null : onPreview,
-                  icon: isGeneratingPreview
+                  onPressed: widget.isGeneratingPreview ? null : widget.onPreview,
+                  icon: widget.isGeneratingPreview
                       ? const SizedBox(
                           width: 18,
                           height: 18,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.visibility_outlined),
-                  label: Text(isGeneratingPreview ? '生成中...' : '生成预览'),
+                  label: Text(widget.isGeneratingPreview ? '生成中...' : '生成预览'),
                 ),
                 FilledButton.tonalIcon(
-                  onPressed: task.isAwaitingMaskConfirmation && !isConfirming
-                      ? onConfirm
+                  onPressed: task.isAwaitingMaskConfirmation && !widget.isConfirming
+                      ? widget.onConfirm
                       : null,
-                  icon: isConfirming
+                  icon: widget.isConfirming
                       ? const SizedBox(
                           width: 18,
                           height: 18,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.check_circle_outline_rounded),
-                  label: Text(isConfirming ? '确认中...' : '确认并继续'),
+                  label: Text(widget.isConfirming ? '确认中...' : '确认并继续'),
                 ),
               ],
             ),
@@ -956,6 +1258,31 @@ class _MaskPromptCard extends StatelessWidget {
       ),
     );
   }
+}
+
+Rect _fittedImageRect(Size boxSize, double aspectRatio) {
+  if (boxSize.width <= 0 || boxSize.height <= 0) {
+    return Rect.zero;
+  }
+  if (aspectRatio <= 0) {
+    return Offset.zero & boxSize;
+  }
+
+  final boxAspect = boxSize.width / boxSize.height;
+  double width;
+  double height;
+  if (boxAspect > aspectRatio) {
+    height = boxSize.height;
+    width = height * aspectRatio;
+  } else {
+    width = boxSize.width;
+    height = width / aspectRatio;
+  }
+  return Rect.fromCenter(
+    center: boxSize.center(Offset.zero),
+    width: width,
+    height: height,
+  );
 }
 
 class _LogsCard extends StatelessWidget {

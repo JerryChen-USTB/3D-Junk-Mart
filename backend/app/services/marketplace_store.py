@@ -4,6 +4,7 @@ import base64
 import hashlib
 import json
 import sqlite3
+import threading
 import uuid
 from datetime import datetime, timezone
 from functools import lru_cache
@@ -127,18 +128,39 @@ class MarketplaceStore:
     def __init__(self, db_path: Path | None = None) -> None:
         self.db_path = Path(db_path or BUSINESS_DB_PATH)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.connection = sqlite3.connect(self.db_path, check_same_thread=False)
-        self.connection.row_factory = sqlite3.Row
-        self._configure_connection()
+        self._local = threading.local()
+        # Bootstrap schema on the main-thread connection.
         self._ensure_schema()
         self._ensure_seed_assets()
+        self._seed_platform_metadata()
         self._seed_if_needed()
 
-    def _configure_connection(self) -> None:
-        self.connection.execute("PRAGMA foreign_keys = ON")
-        self.connection.execute("PRAGMA journal_mode = WAL")
-        self.connection.execute("PRAGMA synchronous = NORMAL")
-        self.connection.execute("PRAGMA busy_timeout = 3000")
+    def _make_connection(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
+        conn.execute("PRAGMA busy_timeout = 3000")
+        return conn
+
+    @property
+    def connection(self) -> sqlite3.Connection:
+        """Return a per-thread connection, creating one if needed."""
+        conn: sqlite3.Connection | None = getattr(self._local, "conn", None)
+        if conn is not None:
+            try:
+                conn.execute("SELECT 1")
+                return conn
+            except (sqlite3.InterfaceError, sqlite3.ProgrammingError):
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+        conn = self._make_connection()
+        self._local.conn = conn
+        return conn
+
 
     def _ensure_schema(self) -> None:
         existing_columns = self.connection.execute("PRAGMA table_info(records)").fetchall()
@@ -177,10 +199,13 @@ class MarketplaceStore:
         pass
 
     def close(self) -> None:
-        try:
-            self.connection.close()
-        except sqlite3.Error:
-            pass
+        conn = getattr(self._local, "conn", None)
+        if conn is not None:
+            try:
+                conn.close()
+            except sqlite3.Error:
+                pass
+            self._local.conn = None
 
     def count_records(self, entity_type: str | None = None) -> int:
         if entity_type is None:
@@ -272,6 +297,158 @@ class MarketplaceStore:
         seed_root = STORAGE_ROOT / "seed"
         for relative_path, payload in _SEED_PLACEHOLDER_ASSETS.items():
             _write_bytes_if_missing(seed_root / relative_path, payload)
+
+    def _seed_platform_metadata(self) -> None:
+        now = _utc_now()
+
+        categories = [
+            {
+                "id": "cat_digital",
+                "parent_id": None,
+                "name": "Digital",
+                "slug": "digital",
+                "icon_key": "devices",
+                "sort_order": 1,
+                "active": True,
+                "listing_count": 0,
+            },
+            {
+                "id": "cat_home",
+                "parent_id": None,
+                "name": "Home",
+                "slug": "home",
+                "icon_key": "chair",
+                "sort_order": 2,
+                "active": True,
+                "listing_count": 0,
+            },
+            {
+                "id": "cat_fashion",
+                "parent_id": None,
+                "name": "Fashion",
+                "slug": "fashion",
+                "icon_key": "style",
+                "sort_order": 3,
+                "active": True,
+                "listing_count": 0,
+            },
+            {
+                "id": "cat_collectibles",
+                "parent_id": None,
+                "name": "Collectibles",
+                "slug": "collectibles",
+                "icon_key": "diamond",
+                "sort_order": 4,
+                "active": True,
+                "listing_count": 0,
+            },
+        ]
+        for category in categories:
+            self._seed("category", category["id"], category)
+
+        service_cards = [
+            ("service_publish", "Publish", "add_box", "route", "/sell", 1),
+            ("service_orders", "Orders", "receipt_long", "route", "/pages/orders", 2),
+            ("service_wallet", "Wallet", "wallet", "route", "/pages/wallet", 3),
+            ("service_membership", "Membership", "workspace_premium", "route", "/pages/membership", 4),
+        ]
+        for service_key, title, icon, destination_type, destination_ref, sort_order in service_cards:
+            self._seed(
+                "service_card",
+                service_key,
+                {
+                    "id": service_key,
+                    "service_key": service_key,
+                    "title": title,
+                    "icon": icon,
+                    "badge": None,
+                    "description": None,
+                    "destination_type": destination_type,
+                    "destination_ref": destination_ref,
+                    "sort_order": sort_order,
+                },
+            )
+
+        banners = [
+            {
+                "id": "banner_home_empty",
+                "title": "3D second-hand marketplace",
+                "subtitle": "Publish from your phone, train remotely, and sell with a 3D preview.",
+                "image_url": "/storage/seed/banners/banner.jpg",
+                "thumbnail_url": "/storage/seed/banners/banner_thumb.jpg",
+                "action_type": "route",
+                "action_ref": "/pages/home",
+                "sort_order": 1,
+                "active": True,
+            }
+        ]
+        for banner in banners:
+            self._seed("banner", banner["id"], banner)
+
+        membership_plans = [
+            {
+                "id": "plan_starter",
+                "plan_key": "starter",
+                "title": "Starter",
+                "price_minor": 0,
+                "currency": "CNY",
+                "benefits_json": ["Basic store exposure", "3D publishing workflow"],
+                "active": True,
+            },
+            {
+                "id": "plan_pro",
+                "plan_key": "pro",
+                "title": "Pro Seller",
+                "price_minor": 2999,
+                "currency": "CNY",
+                "benefits_json": ["Featured placement", "Priority support", "Seller growth tips"],
+                "active": True,
+            },
+        ]
+        for plan in membership_plans:
+            self._seed("membership_plan", plan["id"], plan)
+
+        review_tags = [
+            ("review_tag_match", "as_described", "As described", "quality"),
+            ("review_tag_fast", "fast_shipping", "Fast shipping", "shipping"),
+            ("review_tag_service", "smooth_chat", "Smooth communication", "service"),
+            ("review_tag_packaging", "safe_packaging", "Safe packaging", "shipping"),
+        ]
+        for tag_id, tag_key, display_name, tag_group in review_tags:
+            self._seed(
+                "review_tag",
+                tag_id,
+                {
+                    "id": tag_id,
+                    "tag_key": tag_key,
+                    "display_name": display_name,
+                    "tag_group": tag_group,
+                    "active": True,
+                },
+            )
+
+        self._seed(
+            "search_suggestion",
+            "search_default",
+            {
+                "id": "search_default",
+                "query": "",
+                "suggestions": ["camera", "chair", "3d", "bag"],
+                "recent_queries": [],
+                "updated_at": now,
+            },
+        )
+
+        self._seed(
+            "feature_flag",
+            "guest_entry_enabled",
+            {
+                "id": "guest_entry_enabled",
+                "flag_key": "guest_entry_enabled",
+                "enabled": True,
+                "updated_at": now,
+            },
+        )
 
     def seed_demo_data(self) -> None:
         now = _utc_now()
@@ -1185,6 +1362,12 @@ class MarketplaceStore:
             return first_user["entity_id"]
         raise RuntimeError("No seeded user available.")
 
+    def default_user_id_or_none(self) -> str | None:
+        try:
+            return self.default_user_id()
+        except RuntimeError:
+            return None
+
     def user_record(self, user_id: str) -> dict[str, Any] | None:
         return self.get_record("user", user_id)
 
@@ -1445,22 +1628,87 @@ class MarketplaceStore:
     def current_user(self, access_token: str | None) -> dict[str, Any]:
         session = self.session_by_token(access_token)
         if session is None:
-            user = self.user_record(self.default_user_id())
-        else:
-            user = self.user_record(session["payload"]["user_id"])
+            raise RuntimeError("No current user available.")
+        user = self.user_record(session["payload"]["user_id"])
         if user is None:
             raise RuntimeError("No current user available.")
         return user
 
+    def ensure_wallet_account(self, user_id: str, *, currency: str = "CNY") -> dict[str, Any]:
+        account = self.find_first("wallet_account", predicate=lambda item: item["payload"].get("user_id") == user_id)
+        if account is not None:
+            return account
+        account_id = f"wallet_{user_id}"
+        payload = {
+            "id": account_id,
+            "user_id": user_id,
+            "available_minor": 0,
+            "held_minor": 0,
+            "currency": currency,
+            "status": "active",
+            "created_at": _utc_now(),
+            "updated_at": _utc_now(),
+        }
+        return self.upsert_record("wallet_account", account_id, payload, parent_id=user_id)
+
+    def append_wallet_transaction(
+        self,
+        user_id: str,
+        *,
+        transaction_type: str,
+        amount_minor: int,
+        reference_type: str | None = None,
+        reference_id: str | None = None,
+        status: str = "posted",
+        currency: str = "CNY",
+    ) -> dict[str, Any]:
+        account = self.ensure_wallet_account(user_id, currency=currency)
+        tx_id = _generate_id("wallet_tx")
+        payload = {
+            "id": tx_id,
+            "wallet_account_id": account["entity_id"],
+            "transaction_type": transaction_type,
+            "amount_minor": amount_minor,
+            "currency": currency,
+            "reference_type": reference_type,
+            "reference_id": reference_id,
+            "status": status,
+            "created_at": _utc_now(),
+        }
+        return self.upsert_record("wallet_transaction", tx_id, payload, parent_id=account["entity_id"])
+
+    def create_notification(
+        self,
+        user_id: str,
+        *,
+        notification_type: str,
+        title: str,
+        body: str,
+        entity_type: str | None = None,
+        entity_id: str | None = None,
+    ) -> dict[str, Any]:
+        notification_id = _generate_id("notification")
+        payload = {
+            "id": notification_id,
+            "user_id": user_id,
+            "notification_type": notification_type,
+            "title": title,
+            "body": body,
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "read_at": None,
+            "created_at": _utc_now(),
+        }
+        return self.upsert_record("notification", notification_id, payload, parent_id=user_id)
+
     def health_snapshot(self) -> dict[str, Any]:
         seeded_users = self.count_records("user")
         seeded_listings = self.count_records("listing")
-        demo_user_id = self.default_user_id()
         return {
             "status": "ok",
             "version": "0.1.0",
             "database_ready": True,
-            "demo_user_id": demo_user_id,
+            "demo_user_id": self.default_user_id_or_none(),
             "seeded_users": seeded_users,
             "seeded_listings": seeded_listings,
         }

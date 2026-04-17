@@ -10,11 +10,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFil
 from backend.app.http import ok
 from backend.app.schemas import (
     ConversationReadRequest,
+    ConversationCreateRequest,
     AuthLoginRequest,
     AuthRefreshRequest,
     AuthRegisterRequest,
     MembershipUpgradeRequest,
     NotificationReadRequest,
+    OrderCreateRequest,
+    OrderDisputeRequest,
+    OrderShipRequest,
     ReviewCreateRequest,
     ReviewDraftUpdateRequest,
     SendMessageRequest,
@@ -24,6 +28,7 @@ from backend.app.schemas import (
     TypingIndicatorRequest,
     UploadPresignRequest,
     UploadPresignResponse,
+    ListingUpdateRequest,
     UserAddressCreateRequest,
     UserAddressUpdateRequest,
     UserProfileUpdate,
@@ -98,6 +103,188 @@ def _require_current_user(store: MarketplaceStore, request: Request) -> dict[str
 
 def _require_current_user_id(store: MarketplaceStore, request: Request) -> str:
     return _require_current_user(store, request)["entity_id"]
+
+
+def _guest_auth_payload() -> dict[str, Any]:
+    return {
+        "user": {
+            "id": "guest",
+            "display_name": "Guest",
+            "avatar_url": None,
+            "bio": "Browse the marketplace in read-only mode.",
+            "location": None,
+            "sesame_credit_score": 0,
+            "vip_level": "guest",
+            "follower_count": 0,
+            "following_count": 0,
+            "positive_rate": None,
+        },
+        "session": {
+            "id": "guest-session",
+            "access_token": "",
+            "refresh_token": None,
+            "access_token_expires_at": _now(),
+            "refresh_token_expires_at": _now(),
+            "device_name": "guest",
+            "device_platform": "guest",
+            "is_new_user": False,
+            "guest_mode": True,
+        },
+        "profile": {
+            "id": "guest",
+            "display_name": "Guest",
+            "avatar_url": None,
+            "birth_date": None,
+            "age_years": None,
+            "bio": "Browse items, 3D previews, and search results before signing in.",
+            "location": None,
+            "sesame_credit_score": 0,
+            "vip_level": "guest",
+            "profile_visibility": "public",
+            "updated_at": _now(),
+        },
+    }
+
+
+def _member_record(store: MarketplaceStore, conversation_id: str, user_id: str) -> dict[str, Any] | None:
+    return store.find_first(
+        "conversation_member",
+        predicate=lambda item: item["payload"].get("conversation_id") == conversation_id and item["payload"].get("user_id") == user_id,
+    )
+
+
+def _set_conversation_member_unread(
+    store: MarketplaceStore,
+    conversation_id: str,
+    user_id: str,
+    *,
+    unread_count: int,
+    last_read_message_id: str | None = None,
+) -> None:
+    member = _member_record(store, conversation_id, user_id)
+    if member is None:
+        return
+    payload = dict(member["payload"])
+    payload["unread_count"] = max(unread_count, 0)
+    if last_read_message_id is not None:
+        payload["last_read_message_id"] = last_read_message_id
+    store.upsert_record("conversation_member", member["entity_id"], payload, parent_id=conversation_id)
+
+
+def _ensure_listing_exists(store: MarketplaceStore, listing_id: str) -> dict[str, Any]:
+    listing = store.get_record("listing", listing_id)
+    if listing is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Listing not found.")
+    return listing
+
+
+def _ensure_order_exists(store: MarketplaceStore, order_id: str) -> dict[str, Any]:
+    order = store.get_record("order", order_id)
+    if order is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found.")
+    return order
+
+
+def _update_listing_status(store: MarketplaceStore, listing_id: str, status_name: str) -> dict[str, Any]:
+    listing = _ensure_listing_exists(store, listing_id)
+    payload = dict(listing["payload"])
+    payload["status"] = status_name
+    payload["updated_at"] = _now()
+    return store.upsert_record("listing", listing_id, payload)
+
+
+def _ensure_owned_listing(store: MarketplaceStore, listing_id: str, user_id: str) -> dict[str, Any]:
+    listing = _ensure_listing_exists(store, listing_id)
+    if listing["payload"].get("seller_id") != user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Listing not found.")
+    return listing
+
+
+def _upload_extension(filename: str | None, content_type: str | None) -> str:
+    content_type = (content_type or "").lower()
+    if content_type == "image/png":
+        return ".png"
+    if content_type == "image/webp":
+        return ".webp"
+    if content_type in {"image/jpg", "image/jpeg"}:
+        return ".jpg"
+
+    suffix = (filename or "").lower()
+    for candidate in (".png", ".webp", ".jpg", ".jpeg"):
+        if suffix.endswith(candidate):
+            return ".jpg" if candidate == ".jpeg" else candidate
+    return ".jpg"
+
+
+async def _store_uploaded_cover(file: UploadFile, *, namespace: str) -> dict[str, Any]:
+    content_type = (file.content_type or "").lower()
+    if content_type and not content_type.startswith("image/"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only image files are supported.")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded image is empty.")
+    if len(content) > 4 * 1024 * 1024:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cover image must be 4MB or smaller.")
+
+    from shared.config import STORAGE_ROOT
+
+    ext = _upload_extension(file.filename, content_type)
+    asset_id = _new_id(f"{namespace}_cover")
+    relative_dir = "listing_covers"
+    storage_dir = STORAGE_ROOT / relative_dir
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    relative_name = f"{asset_id}{ext}"
+    storage_path = storage_dir / relative_name
+    storage_path.write_bytes(content)
+    public_url = f"/storage/{relative_dir}/{relative_name}"
+    return {
+        "id": asset_id,
+        "kind": "image",
+        "url": public_url,
+        "thumbnail_url": public_url,
+        "mime_type": content_type or None,
+        "sort_order": 0,
+    }
+
+
+def _address_snapshot(record: dict[str, Any] | None) -> dict[str, Any] | None:
+    if record is None:
+        return None
+    payload = dict(record["payload"])
+    return {
+        "receiver_name": payload.get("recipient_name") or "",
+        "phone": payload.get("phone") or "",
+        "region": payload.get("region_code") or "",
+        "detail": payload.get("address_line1") or "",
+        "detail2": payload.get("address_line2"),
+    }
+
+
+def _listing_snapshot(store: MarketplaceStore, listing: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(listing["payload"])
+    seller = _user_summary(store, store.user_record(payload.get("seller_id") or ""))
+    cover = payload.get("cover_media_json") if isinstance(payload.get("cover_media_json"), dict) else None
+    return {
+        "listing_id": listing["entity_id"],
+        "title": payload.get("title") or "",
+        "subtitle": payload.get("subtitle"),
+        "price_minor": int(payload.get("price_minor") or 0),
+        "currency": payload.get("currency") or BASE_CURRENCY,
+        "cover_asset_id": (cover or {}).get("id"),
+        "cover_url": (cover or {}).get("url"),
+        "seller_display_name": (seller or {}).get("display_name"),
+        "viewer_url": payload.get("viewer_url"),
+    }
+
+
+def _find_conversation(store: MarketplaceStore, listing_id: str, buyer_id: str, seller_id: str) -> dict[str, Any] | None:
+    return store.find_first(
+        "conversation",
+        predicate=lambda item: item["payload"].get("listing_id") == listing_id
+        and item["payload"].get("buyer_id") == buyer_id
+        and item["payload"].get("seller_id") == seller_id,
+    )
 
 
 def _user_summary(store: MarketplaceStore, user_record: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -179,6 +366,7 @@ def _address_summary(record: dict[str, Any] | None) -> dict[str, Any] | None:
 def _listing_summary(store: MarketplaceStore, listing_record: dict[str, Any]) -> dict[str, Any]:
     payload = dict(listing_record["payload"])
     seller = _user_summary(store, store.user_record(payload.get("seller_id") or ""))
+    location = payload.get("location_city") or (seller or {}).get("location")
     return {
         "id": listing_record["entity_id"],
         "title": payload.get("title") or "",
@@ -187,7 +375,8 @@ def _listing_summary(store: MarketplaceStore, listing_record: dict[str, Any]) ->
         "original_price": _money(payload.get("original_price_minor"), payload.get("currency")) if payload.get("original_price_minor") is not None else None,
         "status": payload.get("status") or "draft",
         "cover_media": _media_asset(payload.get("cover_media_json")),
-        "location": payload.get("location_city"),
+        "location": location,
+        "location_city": location,
         "badges": list(payload.get("badges_json") or []),
         "seller": seller,
         "viewer_url": payload.get("viewer_url"),
@@ -256,6 +445,7 @@ def _conversation_summary(store: MarketplaceStore, conversation_record: dict[str
     payload = dict(conversation_record["payload"])
     buyer = store.user_record(payload.get("buyer_id") or "")
     seller = store.user_record(payload.get("seller_id") or "")
+    member = _member_record(store, conversation_record["entity_id"], current_user_id) if current_user_id else None
     if current_user_id and current_user_id == payload.get("buyer_id"):
         other = seller
     elif current_user_id and current_user_id == payload.get("seller_id"):
@@ -267,7 +457,7 @@ def _conversation_summary(store: MarketplaceStore, conversation_record: dict[str
         "listing_id": payload.get("listing_id"),
         "other_user": _user_summary(store, other),
         "last_message_preview": payload.get("last_message_preview"),
-        "unread_count": int(payload.get("unread_count") or 0),
+        "unread_count": int((member or {"payload": payload})["payload"].get("unread_count") or 0),
         "updated_at": payload.get("updated_at"),
     }
 
@@ -432,6 +622,73 @@ def _listings_by_status(store: MarketplaceStore, status_name: str | None = None)
     if status_name:
         items = [item for item in items if item["payload"].get("status") == status_name]
     return items
+
+
+def _write_order_event(
+    store: MarketplaceStore,
+    order_id: str,
+    *,
+    status_name: str,
+    event_note: str,
+    actor_user_id: str | None,
+) -> dict[str, Any]:
+    event_id = _new_id("order_event")
+    payload = {
+        "id": event_id,
+        "order_id": order_id,
+        "status": status_name,
+        "event_note": event_note,
+        "actor_user_id": actor_user_id,
+        "occurred_at": _now(),
+    }
+    return store.upsert_record("order_event", event_id, payload, parent_id=order_id)
+
+
+def _upsert_shipment(
+    store: MarketplaceStore,
+    order_id: str,
+    *,
+    carrier_name: str,
+    tracking_no: str,
+    status_name: str,
+    shipped_at: str | None = None,
+    estimated_delivery_at: str | None = None,
+) -> dict[str, Any]:
+    shipment = store.find_first("shipment", predicate=lambda item: item["payload"].get("order_id") == order_id)
+    shipment_id = shipment["entity_id"] if shipment else _new_id("shipment")
+    payload = dict(shipment["payload"]) if shipment else {"id": shipment_id, "order_id": order_id}
+    payload.update(
+        {
+            "id": shipment_id,
+            "order_id": order_id,
+            "carrier_name": carrier_name,
+            "tracking_no": tracking_no,
+            "status": status_name,
+            "shipped_at": shipped_at,
+            "estimated_delivery_at": estimated_delivery_at,
+        }
+    )
+    return store.upsert_record("shipment", shipment_id, payload, parent_id=order_id)
+
+
+def _write_shipment_event(
+    store: MarketplaceStore,
+    shipment_id: str,
+    *,
+    event_code: str,
+    event_text: str,
+    event_city: str | None = None,
+) -> dict[str, Any]:
+    event_id = _new_id("shipment_event")
+    payload = {
+        "id": event_id,
+        "shipment_id": shipment_id,
+        "event_code": event_code,
+        "event_text": event_text,
+        "event_city": event_city,
+        "occurred_at": _now(),
+    }
+    return store.upsert_record("shipment_event", event_id, payload, parent_id=shipment_id)
 
 
 @router.get("/health")
@@ -668,8 +925,8 @@ def auth_refresh(request: Request, payload: AuthRefreshRequest, store: Marketpla
 
 
 @router.post("/auth/logout")
-def auth_logout(request: Request, payload: LogoutRequest, store: MarketplaceStore = Depends(get_store)) -> dict[str, Any]:
-    token = payload.access_token or _bearer_token(request)
+def auth_logout(request: Request, payload: LogoutRequest | None = None, store: MarketplaceStore = Depends(get_store)) -> dict[str, Any]:
+    token = (payload.access_token if payload else None) or _bearer_token(request)
     session = store.revoke_session(token)
     return ok(request, {"revoked": session is not None})
 
@@ -679,10 +936,14 @@ def auth_session(request: Request, store: MarketplaceStore = Depends(get_store))
     token = _bearer_token(request)
     session = store.session_by_token(token)
     if session is None:
-        session = store.session_by_token("demo-access-token")
-    user_id = session["payload"]["user_id"] if session else store.default_user_id()
+        return ok(request, _guest_auth_payload())
+    user_id = session["payload"]["user_id"]
     user_record = store.user_record(user_id)
-    return ok(request, {"user": _user_summary(store, user_record), "session": session["payload"] if session else None, "profile": _profile_detail(store, user_record)})
+    if user_record is None:
+        return ok(request, _guest_auth_payload())
+    session_payload = dict(session["payload"])
+    session_payload["guest_mode"] = False
+    return ok(request, {"user": _user_summary(store, user_record), "session": session_payload, "profile": _profile_detail(store, user_record)})
 
 
 @router.get("/users/me")
@@ -738,7 +999,11 @@ def users_me_stats(request: Request, store: MarketplaceStore = Depends(get_store
 @router.get("/users/me/listings")
 def users_me_listings(request: Request, store: MarketplaceStore = Depends(get_store), page: int = Query(1, ge=1), page_size: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=100)) -> dict[str, Any]:
     user_id = _require_current_user_id(store, request)
-    items = [_listing_summary(store, item) for item in store.list_records("listing") if item["payload"].get("seller_id") == user_id]
+    items = [
+        _listing_summary(store, item)
+        for item in store.list_records("listing")
+        if item["payload"].get("seller_id") == user_id and item["payload"].get("status") != "deleted"
+    ]
     page_items, page_meta = store.paginate(items, page=page, page_size=page_size)
     return ok(request, page_items, page=page_meta)
 
@@ -747,7 +1012,11 @@ def users_me_listings(request: Request, store: MarketplaceStore = Depends(get_st
 def users_me_favorites(request: Request, store: MarketplaceStore = Depends(get_store), page: int = Query(1, ge=1), page_size: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=100)) -> dict[str, Any]:
     user_id = _require_current_user_id(store, request)
     favorite_ids = {item["payload"].get("listing_id") for item in store.list_records("listing_favorite") if item["payload"].get("user_id") == user_id}
-    items = [_listing_summary(store, item) for item in store.list_records("listing") if item["entity_id"] in favorite_ids]
+    items = [
+        _listing_summary(store, item)
+        for item in store.list_records("listing")
+        if item["entity_id"] in favorite_ids and item["payload"].get("status") != "deleted"
+    ]
     page_items, page_meta = store.paginate(items, page=page, page_size=page_size)
     return ok(request, page_items, page=page_meta)
 
@@ -869,6 +1138,35 @@ def page_home(request: Request, store: MarketplaceStore = Depends(get_store)) ->
     return ok(request, _page("home", title="首页", sections=sections, resources={"listings": listings[:10]}))
 
 
+@router.get("/home/feed")
+def home_feed(
+    request: Request,
+    store: MarketplaceStore = Depends(get_store),
+    query: str = Query(""),
+    category_id: str | None = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=100),
+) -> dict[str, Any]:
+    items = [_listing_summary(store, item) for item in _listings_by_status(store, "live")]
+    if query:
+        lowered = query.lower()
+        items = [
+            item
+            for item in items
+            if lowered in item["title"].lower()
+            or lowered in (item.get("subtitle") or "").lower()
+            or lowered in (item.get("location") or "").lower()
+        ]
+    if category_id:
+        items = [
+            item
+            for item in items
+            if (store.get_record("listing", item["id"]) or {"payload": {}})["payload"].get("category_id") == category_id
+        ]
+    page_items, page_meta = store.paginate(items, page=page, page_size=page_size)
+    return ok(request, page_items, page=page_meta)
+
+
 @router.get("/pages/search")
 def page_search(request: Request, store: MarketplaceStore = Depends(get_store)) -> dict[str, Any]:
     documents = store.search_documents()
@@ -937,7 +1235,13 @@ def listings(
     page: int = Query(1, ge=1),
     page_size: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=100),
 ) -> dict[str, Any]:
-    items = [_listing_summary(store, item) for item in store.list_records("listing")]
+    items = [
+        _listing_summary(store, item)
+        for item in store.list_records("listing")
+        if item["payload"].get("status") != "deleted"
+    ]
+    if not status_name and not seller_id:
+        items = [item for item in items if item["status"] == "live"]
     if query:
         lowered = query.lower()
         items = [item for item in items if lowered in item["title"].lower() or lowered in (item.get("subtitle") or "").lower()]
@@ -953,7 +1257,11 @@ def listings(
 
 @router.get("/categories/{category_id}/listings")
 def category_listings(request: Request, category_id: str, store: MarketplaceStore = Depends(get_store), page: int = Query(1, ge=1), page_size: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=100)) -> dict[str, Any]:
-    items = [_listing_summary(store, item) for item in store.list_records("listing") if item["payload"].get("category_id") == category_id]
+    items = [
+        _listing_summary(store, item)
+        for item in store.list_records("listing")
+        if item["payload"].get("category_id") == category_id and item["payload"].get("status") == "live"
+    ]
     page_items, page_meta = store.paginate(items, page=page, page_size=page_size)
     return ok(request, page_items, page=page_meta)
 
@@ -961,7 +1269,7 @@ def category_listings(request: Request, category_id: str, store: MarketplaceStor
 @router.get("/pages/listings/{listing_id}")
 def page_listing(request: Request, listing_id: str, store: MarketplaceStore = Depends(get_store)) -> dict[str, Any]:
     listing = store.get_record("listing", listing_id)
-    if listing is None:
+    if listing is None or listing["payload"].get("status") == "deleted":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="商品不存在。")
     return ok(request, _page("listing_detail", title="商品详情", resources=_listing_detail(store, listing)))
 
@@ -969,7 +1277,7 @@ def page_listing(request: Request, listing_id: str, store: MarketplaceStore = De
 @router.get("/listings/{listing_id}")
 def listing_detail(request: Request, listing_id: str, store: MarketplaceStore = Depends(get_store)) -> dict[str, Any]:
     listing = store.get_record("listing", listing_id)
-    if listing is None:
+    if listing is None or listing["payload"].get("status") == "deleted":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="商品不存在。")
     return ok(request, _listing_detail(store, listing))
 
@@ -983,7 +1291,7 @@ def listing_media(request: Request, listing_id: str, store: MarketplaceStore = D
 @router.get("/listings/{listing_id}/seller")
 def listing_seller(request: Request, listing_id: str, store: MarketplaceStore = Depends(get_store)) -> dict[str, Any]:
     listing = store.get_record("listing", listing_id)
-    if listing is None:
+    if listing is None or listing["payload"].get("status") == "deleted":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="商品不存在。")
     seller = _user_summary(store, store.user_record(listing["payload"].get("seller_id") or ""))
     return ok(request, seller)
@@ -1001,16 +1309,95 @@ def listing_specs(request: Request, listing_id: str, store: MarketplaceStore = D
 @router.get("/listings/{listing_id}/similar")
 def listing_similar(request: Request, listing_id: str, store: MarketplaceStore = Depends(get_store)) -> dict[str, Any]:
     listing = store.get_record("listing", listing_id)
-    if listing is None:
+    if listing is None or listing["payload"].get("status") == "deleted":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="商品不存在。")
     category_id = listing["payload"].get("category_id")
-    items = [_listing_summary(store, item) for item in store.list_records("listing") if item["entity_id"] != listing_id and item["payload"].get("category_id") == category_id]
+    items = [
+        _listing_summary(store, item)
+        for item in store.list_records("listing")
+        if item["entity_id"] != listing_id
+        and item["payload"].get("category_id") == category_id
+        and item["payload"].get("status") == "live"
+    ]
     return ok(request, items[:6])
 
 
 @router.get("/listings/{listing_id}/inquiries")
 def listing_inquiries(request: Request, listing_id: str) -> dict[str, Any]:
     return ok(request, [])
+
+
+@router.get("/listings/{listing_id}/reviews")
+def listing_reviews(
+    request: Request,
+    listing_id: str,
+    store: MarketplaceStore = Depends(get_store),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=100),
+) -> dict[str, Any]:
+    items = [_review_summary(store, item) for item in store.list_records("review") if item["payload"].get("listing_id") == listing_id]
+    page_items, page_meta = store.paginate(items, page=page, page_size=page_size)
+    return ok(request, page_items, page=page_meta)
+
+
+@router.post("/listings/{listing_id}/cover")
+async def listing_cover_upload(
+    request: Request,
+    listing_id: str,
+    file: UploadFile = File(...),
+    store: MarketplaceStore = Depends(get_store),
+) -> dict[str, Any]:
+    user_id = _require_current_user_id(store, request)
+    listing = _ensure_owned_listing(store, listing_id, user_id)
+    payload = dict(listing["payload"])
+    payload["cover_media_json"] = await _store_uploaded_cover(file, namespace=listing_id)
+    payload["updated_at"] = _now()
+    store.upsert_record("listing", listing_id, payload)
+    return ok(request, _listing_summary(store, store.get_record("listing", listing_id)))
+
+
+@router.patch("/listings/{listing_id}")
+def listing_update(
+    request: Request,
+    listing_id: str,
+    payload: ListingUpdateRequest,
+    store: MarketplaceStore = Depends(get_store),
+) -> dict[str, Any]:
+    user_id = _require_current_user_id(store, request)
+    listing = _ensure_owned_listing(store, listing_id, user_id)
+    changes = payload.model_dump(exclude_none=True)
+    if "title" in changes and not str(changes["title"]).strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Listing title cannot be empty.")
+    if "price_minor" in changes and int(changes["price_minor"]) < 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Listing price cannot be negative.")
+    if "cover_media_json" in changes:
+        changes["cover_media_json"] = _media_asset(changes["cover_media_json"])
+    updated = dict(listing["payload"])
+    updated.update(changes)
+    updated["updated_at"] = _now()
+    store.upsert_record("listing", listing_id, updated)
+    return ok(request, _listing_summary(store, store.get_record("listing", listing_id)))
+
+
+@router.delete("/listings/{listing_id}")
+def listing_delete(request: Request, listing_id: str, store: MarketplaceStore = Depends(get_store)) -> dict[str, Any]:
+    user_id = _require_current_user_id(store, request)
+    listing = _ensure_owned_listing(store, listing_id, user_id)
+    active_order = store.find_first(
+        "order",
+        predicate=lambda item: item["payload"].get("listing_id") == listing_id
+        and item["payload"].get("status") not in {"completed", "cancelled"},
+    )
+    if active_order is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Listing cannot be deleted while it has an active order.",
+        )
+    payload = dict(listing["payload"])
+    payload["status"] = "deleted"
+    payload["updated_at"] = _now()
+    store.upsert_record("listing", listing_id, payload)
+    return ok(request, {"listing_id": listing_id, "deleted": True})
 
 
 @router.post("/listings/{listing_id}/favorite")
@@ -1134,6 +1521,84 @@ def upload_presign(request: Request, payload: UploadPresignRequest, store: Marke
     return ok(request, response.model_dump(mode="json"))
 
 
+@router.post("/conversations")
+def create_conversation(
+    request: Request,
+    payload: ConversationCreateRequest,
+    store: MarketplaceStore = Depends(get_store),
+) -> dict[str, Any]:
+    user = _require_current_user(store, request)
+    listing = _ensure_listing_exists(store, payload.listing_id)
+    seller_id = listing["payload"].get("seller_id") or ""
+    buyer_id = user["entity_id"]
+    if not seller_id:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Listing seller is missing.")
+    if seller_id == buyer_id:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="You cannot create a conversation for your own listing.")
+
+    existing = _find_conversation(store, payload.listing_id, buyer_id, seller_id)
+    if existing is not None:
+        if payload.content_text and payload.content_text.strip():
+            send_conversation_message(
+                request,
+                existing["entity_id"],
+                SendMessageRequest(content_text=payload.content_text.strip()),
+                store,
+            )
+        return ok(request, _conversation_detail(store, store.get_record("conversation", existing["entity_id"]) or existing, current_user_id=buyer_id))
+
+    conversation_id = _new_id("conversation")
+    now = _now()
+    conversation_payload = {
+        "id": conversation_id,
+        "listing_id": payload.listing_id,
+        "buyer_id": buyer_id,
+        "seller_id": seller_id,
+        "status": "active",
+        "last_message_preview": None,
+        "unread_count": 0,
+        "updated_at": now,
+        "last_message_at": None,
+        "created_at": now,
+    }
+    store.upsert_record("conversation", conversation_id, conversation_payload)
+    store.upsert_record(
+        "conversation_member",
+        f"member_{conversation_id}_{buyer_id}",
+        {
+            "id": f"member_{conversation_id}_{buyer_id}",
+            "conversation_id": conversation_id,
+            "user_id": buyer_id,
+            "role": "buyer",
+            "last_read_message_id": None,
+            "unread_count": 0,
+        },
+        parent_id=conversation_id,
+    )
+    store.upsert_record(
+        "conversation_member",
+        f"member_{conversation_id}_{seller_id}",
+        {
+            "id": f"member_{conversation_id}_{seller_id}",
+            "conversation_id": conversation_id,
+            "user_id": seller_id,
+            "role": "seller",
+            "last_read_message_id": None,
+            "unread_count": 0,
+        },
+        parent_id=conversation_id,
+    )
+    if payload.content_text and payload.content_text.strip():
+        send_conversation_message(
+            request,
+            conversation_id,
+            SendMessageRequest(content_text=payload.content_text.strip()),
+            store,
+        )
+    detail = _conversation_detail(store, store.get_record("conversation", conversation_id) or {"entity_id": conversation_id, "payload": conversation_payload}, current_user_id=buyer_id)
+    return ok(request, detail)
+
+
 @router.get("/conversations")
 def conversations(
     request: Request,
@@ -1161,7 +1626,30 @@ def conversation_detail(request: Request, conversation_id: str, store: Marketpla
     return ok(request, _conversation_detail(store, conversation, current_user_id=user["entity_id"]))
 
 
-@router.post("/conversations/{conversation_id}/messages")
+@router.get("/conversations/{conversation_id}/messages")
+def conversation_messages(
+    request: Request,
+    conversation_id: str,
+    store: MarketplaceStore = Depends(get_store),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=100),
+) -> dict[str, Any]:
+    user = _require_current_user(store, request)
+    conversation = store.get_record("conversation", conversation_id)
+    if conversation is None or user["entity_id"] not in {conversation["payload"].get("buyer_id"), conversation["payload"].get("seller_id")}:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found.")
+    items = _conversation_detail(store, conversation, current_user_id=user["entity_id"])["messages"]
+    page_items, page_meta = store.paginate(items, page=page, page_size=page_size)
+    return ok(request, page_items, page=page_meta)
+
+
+@router.get("/pages/conversations/{conversation_id}")
+def page_conversation_detail(request: Request, conversation_id: str, store: MarketplaceStore = Depends(get_store)) -> dict[str, Any]:
+    detail = conversation_detail(request, conversation_id, store)["data"]
+    return ok(request, _page("conversation_detail", title="Conversation", subtitle="View message history and related item details.", resources=detail))
+
+
+@router.post("/_legacy/conversations/{conversation_id}/messages")
 def send_conversation_message(
     request: Request,
     conversation_id: str,
@@ -1205,7 +1693,7 @@ def send_conversation_message(
     return ok(request, message_payload)
 
 
-@router.post("/conversations/{conversation_id}/read")
+@router.post("/_legacy/conversations/{conversation_id}/read")
 def read_conversation(
     request: Request,
     conversation_id: str,
@@ -1241,6 +1729,182 @@ def conversation_typing(
 ) -> dict[str, Any]:
     _require_current_user_id(store, request)
     return ok(request, {"conversation_id": conversation_id, "is_typing": payload.is_typing})
+
+
+@router.post("/conversations/{conversation_id}/messages")
+def send_conversation_message_v2(
+    request: Request,
+    conversation_id: str,
+    payload: SendMessageRequest,
+    store: MarketplaceStore = Depends(get_store),
+) -> dict[str, Any]:
+    user = _require_current_user(store, request)
+    conversation = store.get_record("conversation", conversation_id)
+    if conversation is None or user["entity_id"] not in {conversation["payload"].get("buyer_id"), conversation["payload"].get("seller_id")}:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found.")
+
+    now = _now()
+    asset = None
+    if payload.asset_id:
+        asset = {
+            "id": payload.asset_id,
+            "kind": payload.message_type if payload.message_type in {"image", "video"} else "image",
+            "url": f"/storage/uploads/{payload.asset_id}",
+            "thumbnail_url": None,
+            "width": None,
+            "height": None,
+            "mime_type": None,
+            "sort_order": 0,
+        }
+    message_id = _new_id("message")
+    message_payload = {
+        "id": message_id,
+        "conversation_id": conversation_id,
+        "sender_id": user["entity_id"],
+        "message_type": payload.message_type,
+        "content_text": payload.content_text,
+        "asset": asset,
+        "created_at": now,
+        "read_at": None,
+    }
+    store.upsert_record("message", message_id, message_payload, parent_id=conversation_id)
+
+    conversation_payload = dict(conversation["payload"])
+    conversation_payload["last_message_preview"] = payload.content_text or ("Sent an attachment" if asset else "New message")
+    conversation_payload["updated_at"] = now
+    conversation_payload["last_message_at"] = now
+    store.upsert_record("conversation", conversation_id, conversation_payload)
+
+    recipient_id = (
+        conversation_payload.get("seller_id")
+        if user["entity_id"] == conversation_payload.get("buyer_id")
+        else conversation_payload.get("buyer_id")
+    )
+    _set_conversation_member_unread(store, conversation_id, user["entity_id"], unread_count=0, last_read_message_id=message_id)
+    if recipient_id:
+        recipient_member = _member_record(store, conversation_id, recipient_id)
+        next_unread = int((recipient_member or {"payload": {}})["payload"].get("unread_count") or 0) + 1
+        _set_conversation_member_unread(store, conversation_id, recipient_id, unread_count=next_unread)
+        store.create_notification(
+            recipient_id,
+            notification_type="message",
+            title="New message",
+            body=payload.content_text or "You received a new message.",
+            entity_type="conversation",
+            entity_id=conversation_id,
+        )
+    return ok(request, message_payload)
+
+
+@router.post("/conversations/{conversation_id}/read")
+def read_conversation_v2(
+    request: Request,
+    conversation_id: str,
+    payload: ConversationReadRequest,
+    store: MarketplaceStore = Depends(get_store),
+) -> dict[str, Any]:
+    user = _require_current_user(store, request)
+    conversation = store.get_record("conversation", conversation_id)
+    if conversation is None or user["entity_id"] not in {conversation["payload"].get("buyer_id"), conversation["payload"].get("seller_id")}:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found.")
+
+    user_id = user["entity_id"]
+    member = _member_record(store, conversation_id, user_id)
+    if member is not None:
+        member_payload = dict(member["payload"])
+        member_payload["last_read_message_id"] = payload.last_read_message_id
+        member_payload["unread_count"] = 0
+        store.upsert_record("conversation_member", member["entity_id"], member_payload, parent_id=conversation_id)
+
+    read_at = _now()
+    for record in store.list_records("message", parent_id=conversation_id):
+        message_payload = dict(record["payload"])
+        if message_payload.get("sender_id") != user_id and message_payload.get("read_at") is None:
+            message_payload["read_at"] = read_at
+            store.upsert_record("message", record["entity_id"], message_payload, parent_id=conversation_id)
+
+    return ok(request, {"conversation_id": conversation_id, "last_read_message_id": payload.last_read_message_id, "read_at": read_at})
+
+
+@router.post("/orders")
+def create_order(
+    request: Request,
+    payload: OrderCreateRequest,
+    store: MarketplaceStore = Depends(get_store),
+) -> dict[str, Any]:
+    buyer = _require_current_user(store, request)
+    listing = _ensure_listing_exists(store, payload.listing_id)
+    listing_payload = dict(listing["payload"])
+    seller_id = listing_payload.get("seller_id") or ""
+    buyer_id = buyer["entity_id"]
+    if not seller_id:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Listing seller is missing.")
+    if seller_id == buyer_id:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="You cannot place an order on your own listing.")
+    if listing_payload.get("status") != "live":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only live listings can be ordered.")
+
+    address = store.get_user_address(payload.address_id)
+    if address is None or address["payload"].get("user_id") != buyer_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Address not found.")
+
+    order_id = _new_id("order")
+    now = _now()
+    price_minor = int(listing_payload.get("price_minor") or 0)
+    shipping_minor = 0
+    total_minor = price_minor + shipping_minor
+    logistics_json = {
+        "carrier_name": None,
+        "tracking_no": None,
+        "status": "pending",
+        "shipped_at": None,
+        "estimated_delivery_at": None,
+        "address": _address_snapshot(address),
+    }
+    order_payload = {
+        "id": order_id,
+        "order_no": f"ORD-{uuid.uuid4().hex[:8].upper()}",
+        "buyer_id": buyer_id,
+        "seller_id": seller_id,
+        "listing_id": payload.listing_id,
+        "status": "paid",
+        "payment_status": "paid",
+        "shipping_status": "pending",
+        "payment_method": "mock_wallet",
+        "provider_ref": f"mock_{order_id}",
+        "currency": listing_payload.get("currency") or BASE_CURRENCY,
+        "subtotal_minor": price_minor,
+        "shipping_minor": shipping_minor,
+        "discount_minor": 0,
+        "total_minor": total_minor,
+        "can_confirm_receipt": False,
+        "item_snapshot_json": _listing_snapshot(store, listing),
+        "logistics_json": logistics_json,
+        "created_at": now,
+        "updated_at": now,
+    }
+    store.upsert_record("order", order_id, order_payload)
+    _write_order_event(store, order_id, status_name="paid", event_note="Order created and mock payment captured.", actor_user_id=buyer_id)
+    _update_listing_status(store, payload.listing_id, "reserved")
+    store.append_wallet_transaction(buyer_id, transaction_type="purchase", amount_minor=-total_minor, reference_type="order", reference_id=order_id)
+    store.append_wallet_transaction(seller_id, transaction_type="incoming_hold", amount_minor=total_minor, reference_type="order", reference_id=order_id, status="held")
+    store.create_notification(
+        buyer_id,
+        notification_type="order",
+        title="Order placed",
+        body="Your order has been created and is waiting for shipment.",
+        entity_type="order",
+        entity_id=order_id,
+    )
+    store.create_notification(
+        seller_id,
+        notification_type="order",
+        title="New order",
+        body="A buyer has placed an order for your listing.",
+        entity_type="order",
+        entity_id=order_id,
+    )
+    return ok(request, _order_detail(store, store.get_record("order", order_id) or {"entity_id": order_id, "payload": order_payload}))
 
 
 @router.get("/orders")
@@ -1288,7 +1952,187 @@ def order_shipment(request: Request, order_id: str, store: MarketplaceStore = De
     return ok(request, _order_detail(store, order)["receipt"]["shipment"])
 
 
+@router.get("/orders/{order_id}/receipt")
+def order_receipt(request: Request, order_id: str, store: MarketplaceStore = Depends(get_store)) -> dict[str, Any]:
+    user = _require_current_user(store, request)
+    order = _ensure_order_exists(store, order_id)
+    if user["entity_id"] not in {order["payload"].get("buyer_id"), order["payload"].get("seller_id")}:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found.")
+    return ok(request, _order_detail(store, order)["receipt"])
+
+
+@router.post("/orders/{order_id}/ship")
+def ship_order(
+    request: Request,
+    order_id: str,
+    payload: OrderShipRequest,
+    store: MarketplaceStore = Depends(get_store),
+) -> dict[str, Any]:
+    user = _require_current_user(store, request)
+    order = _ensure_order_exists(store, order_id)
+    order_payload = dict(order["payload"])
+    if user["entity_id"] != order_payload.get("seller_id"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the seller can ship this order.")
+    if order_payload.get("status") not in {"paid", "reserved"}:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only paid orders can be shipped.")
+
+    shipped_at = _now()
+    logistics_json = dict(order_payload.get("logistics_json") or {})
+    logistics_json.update(
+        {
+            "carrier_name": payload.carrier_name,
+            "tracking_no": payload.tracking_no,
+            "status": "shipped",
+            "shipped_at": shipped_at,
+            "estimated_delivery_at": payload.estimated_delivery_at,
+        }
+    )
+    order_payload.update(
+        {
+            "status": "shipped",
+            "shipping_status": "shipped",
+            "can_confirm_receipt": True,
+            "logistics_json": logistics_json,
+            "updated_at": shipped_at,
+        }
+    )
+    store.upsert_record("order", order_id, order_payload)
+    shipment = _upsert_shipment(
+        store,
+        order_id,
+        carrier_name=payload.carrier_name,
+        tracking_no=payload.tracking_no,
+        status_name="shipped",
+        shipped_at=shipped_at,
+        estimated_delivery_at=payload.estimated_delivery_at,
+    )
+    _write_shipment_event(store, shipment["entity_id"], event_code="shipped", event_text="Seller marked the order as shipped.")
+    _write_order_event(store, order_id, status_name="shipped", event_note="Seller shipped the order.", actor_user_id=user["entity_id"])
+    buyer_id = order_payload.get("buyer_id")
+    if buyer_id:
+        store.create_notification(
+            buyer_id,
+            notification_type="order",
+            title="Order shipped",
+            body=f"Tracking {payload.tracking_no} is now available.",
+            entity_type="order",
+            entity_id=order_id,
+        )
+    return ok(request, _order_detail(store, store.get_record("order", order_id) or order))
+
+
 @router.post("/orders/{order_id}/confirm-receipt")
+def confirm_receipt_v2(request: Request, order_id: str, store: MarketplaceStore = Depends(get_store)) -> dict[str, Any]:
+    user = _require_current_user(store, request)
+    order = _ensure_order_exists(store, order_id)
+    order_payload = dict(order["payload"])
+    if user["entity_id"] != order_payload.get("buyer_id"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the buyer can confirm receipt.")
+    if order_payload.get("status") != "shipped":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only shipped orders can be completed.")
+
+    now = _now()
+    order_payload.update(
+        {
+            "status": "completed",
+            "shipping_status": "delivered",
+            "can_confirm_receipt": False,
+            "updated_at": now,
+        }
+    )
+    store.upsert_record("order", order_id, order_payload)
+    shipment = store.find_first("shipment", predicate=lambda item: item["payload"].get("order_id") == order_id)
+    if shipment is not None:
+        shipment_payload = dict(shipment["payload"])
+        shipment_payload["status"] = "delivered"
+        store.upsert_record("shipment", shipment["entity_id"], shipment_payload, parent_id=order_id)
+        _write_shipment_event(store, shipment["entity_id"], event_code="delivered", event_text="Buyer confirmed receipt.")
+    _write_order_event(store, order_id, status_name="completed", event_note="Buyer confirmed receipt.", actor_user_id=user["entity_id"])
+    listing_id = order_payload.get("listing_id")
+    if listing_id:
+        _update_listing_status(store, listing_id, "sold")
+    seller_id = order_payload.get("seller_id")
+    if seller_id:
+        total_minor = int(order_payload.get("total_minor") or 0)
+        store.append_wallet_transaction(seller_id, transaction_type="sale_income", amount_minor=total_minor, reference_type="order", reference_id=order_id)
+        store.create_notification(
+            seller_id,
+            notification_type="order",
+            title="Order completed",
+            body="The buyer confirmed receipt.",
+            entity_type="order",
+            entity_id=order_id,
+        )
+    return ok(request, _order_detail(store, store.get_record("order", order_id) or order))
+
+
+@router.post("/orders/{order_id}/cancel")
+def cancel_order_v2(request: Request, order_id: str, store: MarketplaceStore = Depends(get_store)) -> dict[str, Any]:
+    user = _require_current_user(store, request)
+    order = _ensure_order_exists(store, order_id)
+    order_payload = dict(order["payload"])
+    if user["entity_id"] not in {order_payload.get("buyer_id"), order_payload.get("seller_id")}:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found.")
+    if order_payload.get("status") not in {"paid", "reserved"}:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only unshipped orders can be cancelled.")
+
+    now = _now()
+    order_payload.update(
+        {
+            "status": "cancelled",
+            "payment_status": "refunded",
+            "shipping_status": "cancelled",
+            "can_confirm_receipt": False,
+            "updated_at": now,
+        }
+    )
+    store.upsert_record("order", order_id, order_payload)
+    _write_order_event(store, order_id, status_name="cancelled", event_note="Order cancelled before shipment.", actor_user_id=user["entity_id"])
+    listing_id = order_payload.get("listing_id")
+    if listing_id:
+        _update_listing_status(store, listing_id, "live")
+    buyer_id = order_payload.get("buyer_id")
+    if buyer_id:
+        store.append_wallet_transaction(buyer_id, transaction_type="refund", amount_minor=int(order_payload.get("total_minor") or 0), reference_type="order", reference_id=order_id)
+    return ok(request, _order_detail(store, store.get_record("order", order_id) or order))
+
+
+@router.post("/orders/{order_id}/dispute")
+def dispute_order(
+    request: Request,
+    order_id: str,
+    payload: OrderDisputeRequest,
+    store: MarketplaceStore = Depends(get_store),
+) -> dict[str, Any]:
+    user = _require_current_user(store, request)
+    order = _ensure_order_exists(store, order_id)
+    order_payload = dict(order["payload"])
+    if user["entity_id"] not in {order_payload.get("buyer_id"), order_payload.get("seller_id")}:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found.")
+    order_payload["status"] = "disputed"
+    order_payload["can_confirm_receipt"] = False
+    order_payload["updated_at"] = _now()
+    store.upsert_record("order", order_id, order_payload)
+    note = payload.reason.strip() or "A dispute was opened for the order."
+    _write_order_event(store, order_id, status_name="disputed", event_note=note, actor_user_id=user["entity_id"])
+    other_user_id = (
+        order_payload.get("seller_id")
+        if user["entity_id"] == order_payload.get("buyer_id")
+        else order_payload.get("buyer_id")
+    )
+    if other_user_id:
+        store.create_notification(
+            other_user_id,
+            notification_type="order",
+            title="Order dispute opened",
+            body=note,
+            entity_type="order",
+            entity_id=order_id,
+        )
+    return ok(request, _order_detail(store, store.get_record("order", order_id) or order))
+
+
+@router.post("/_legacy/orders/{order_id}/confirm-receipt")
 def confirm_receipt(request: Request, order_id: str, store: MarketplaceStore = Depends(get_store)) -> dict[str, Any]:
     user = _require_current_user(store, request)
     order = store.get_record("order", order_id)
@@ -1316,7 +2160,7 @@ def confirm_receipt(request: Request, order_id: str, store: MarketplaceStore = D
     return ok(request, _order_detail(store, store.get_record("order", order_id) or order))
 
 
-@router.post("/orders/{order_id}/cancel")
+@router.post("/_legacy/orders/{order_id}/cancel")
 def cancel_order(request: Request, order_id: str, store: MarketplaceStore = Depends(get_store)) -> dict[str, Any]:
     user = _require_current_user(store, request)
     order = store.get_record("order", order_id)
@@ -1364,7 +2208,187 @@ def reviews(
     return ok(request, page_items, page=page_meta)
 
 
+@router.get("/reviews/tags")
+def review_tags(request: Request, store: MarketplaceStore = Depends(get_store)) -> dict[str, Any]:
+    items = []
+    for record in store.list_records("review_tag"):
+        payload = record["payload"]
+        if payload.get("active", True):
+            items.append(
+                {
+                    "id": record["entity_id"],
+                    "tag_key": payload.get("tag_key"),
+                    "display_name": payload.get("display_name"),
+                    "tag_group": payload.get("tag_group"),
+                }
+            )
+    return ok(request, items)
+
+
+@router.get("/orders/{order_id}/review-draft")
+def order_review_draft(request: Request, order_id: str, store: MarketplaceStore = Depends(get_store)) -> dict[str, Any]:
+    user = _require_current_user(store, request)
+    order = _ensure_order_exists(store, order_id)
+    if user["entity_id"] != order["payload"].get("buyer_id"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the buyer can review this order.")
+    if order["payload"].get("status") != "completed":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only completed orders can be reviewed.")
+    draft = store.find_first(
+        "review_draft",
+        predicate=lambda item: item["payload"].get("user_id") == user["entity_id"] and item["payload"].get("order_id") == order_id,
+    )
+    if draft is None:
+        payload = {
+            "id": _new_id("review_draft"),
+            "user_id": user["entity_id"],
+            "order_id": order_id,
+            "listing_id": order["payload"].get("listing_id"),
+            "rating": None,
+            "tags": [],
+            "content": "",
+            "media_asset_ids": [],
+            "anonymity_enabled": False,
+            "created_at": _now(),
+            "updated_at": _now(),
+        }
+        draft = store.upsert_record("review_draft", payload["id"], payload, parent_id=user["entity_id"])
+    return ok(request, draft["payload"])
+
+
+@router.patch("/orders/{order_id}/review-draft")
+def update_order_review_draft(
+    request: Request,
+    order_id: str,
+    payload: ReviewDraftUpdateRequest,
+    store: MarketplaceStore = Depends(get_store),
+) -> dict[str, Any]:
+    user = _require_current_user(store, request)
+    order = _ensure_order_exists(store, order_id)
+    if user["entity_id"] != order["payload"].get("buyer_id"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the buyer can review this order.")
+    if order["payload"].get("status") != "completed":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only completed orders can be reviewed.")
+    draft = store.find_first(
+        "review_draft",
+        predicate=lambda item: item["payload"].get("user_id") == user["entity_id"] and item["payload"].get("order_id") == order_id,
+    )
+    if draft is None:
+        draft_id = _new_id("review_draft")
+        draft = store.upsert_record(
+            "review_draft",
+            draft_id,
+            {
+                "id": draft_id,
+                "user_id": user["entity_id"],
+                "order_id": order_id,
+                "listing_id": None,
+                "rating": None,
+                "tags": [],
+                "content": "",
+                "media_asset_ids": [],
+                "anonymity_enabled": False,
+                "created_at": _now(),
+                "updated_at": _now(),
+            },
+            parent_id=user["entity_id"],
+        )
+    updated = dict(draft["payload"])
+    updated.update(payload.model_dump(exclude_none=True))
+    updated["updated_at"] = _now()
+    store.upsert_record("review_draft", draft["entity_id"], updated, parent_id=user["entity_id"])
+    return ok(request, updated)
+
+
 @router.post("/reviews")
+def create_review_v2(request: Request, payload: ReviewCreateRequest, store: MarketplaceStore = Depends(get_store)) -> dict[str, Any]:
+    user = _require_current_user(store, request)
+    order = _ensure_order_exists(store, payload.order_id)
+    order_payload = dict(order["payload"])
+    if user["entity_id"] != order_payload.get("buyer_id"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the buyer can review this order.")
+    if order_payload.get("status") != "completed":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only completed orders can be reviewed.")
+    existing = store.find_first(
+        "review",
+        predicate=lambda item: item["payload"].get("order_id") == payload.order_id and item["payload"].get("reviewer_user_id") == user["entity_id"],
+    )
+    if existing is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This order has already been reviewed.")
+
+    review_id = _new_id("review")
+    now = _now()
+    review_payload = {
+        "id": review_id,
+        "order_id": payload.order_id,
+        "listing_id": payload.listing_id or order_payload.get("listing_id"),
+        "reviewer_user_id": user["entity_id"],
+        "seller_user_id": order_payload.get("seller_id"),
+        "rating": payload.rating,
+        "content": payload.content,
+        "is_anonymous": payload.anonymity_enabled,
+        "status": "published",
+        "created_at": now,
+        "updated_at": now,
+    }
+    store.upsert_record("review", review_id, review_payload)
+    for index, asset_id in enumerate(payload.media_asset_ids):
+        store.upsert_record(
+            "review_media",
+            f"review_media_{review_id}_{index + 1}",
+            {
+                "id": f"review_media_{review_id}_{index + 1}",
+                "review_id": review_id,
+                "asset": {
+                    "id": asset_id,
+                    "kind": "image",
+                    "url": f"/storage/uploads/{asset_id}",
+                    "thumbnail_url": None,
+                    "width": None,
+                    "height": None,
+                    "mime_type": None,
+                    "sort_order": index,
+                },
+                "sort_order": index,
+            },
+            parent_id=review_id,
+        )
+    for index, tag_name in enumerate(payload.tags):
+        tag_record = store.find_first(
+            "review_tag",
+            predicate=lambda item, name=tag_name: item["payload"].get("tag_key") == name or item["payload"].get("display_name") == name,
+        )
+        if tag_record is None:
+            tag_id = _new_id("review_tag")
+            tag_record = store.upsert_record(
+                "review_tag",
+                tag_id,
+                {
+                    "id": tag_id,
+                    "tag_key": tag_name,
+                    "display_name": tag_name,
+                    "tag_group": "custom",
+                    "active": True,
+                },
+            )
+        store.upsert_record(
+            "review_tag_link",
+            f"review_tag_link_{review_id}_{index + 1}",
+            {"id": f"review_tag_link_{review_id}_{index + 1}", "review_id": review_id, "tag_id": tag_record["entity_id"]},
+            parent_id=review_id,
+        )
+    store.create_notification(
+        order_payload.get("seller_id") or "",
+        notification_type="review",
+        title="New review received",
+        body="A buyer has submitted a review for an order.",
+        entity_type="review",
+        entity_id=review_id,
+    )
+    _write_order_event(store, payload.order_id, status_name="reviewed", event_note="Buyer submitted a review.", actor_user_id=user["entity_id"])
+    return ok(request, _review_summary(store, store.get_record("review", review_id) or {"entity_id": review_id, "payload": review_payload}))
+
+
+@router.post("/_legacy/reviews")
 def create_review(request: Request, payload: ReviewCreateRequest, store: MarketplaceStore = Depends(get_store)) -> dict[str, Any]:
     review_id = _new_id("review")
     now = _now()
@@ -1508,6 +2532,11 @@ def wallet(request: Request, store: MarketplaceStore = Depends(get_store)) -> di
     return ok(request, {"account": _wallet_summary(account) if account else None, "transactions": transactions})
 
 
+@router.get("/wallet/summary")
+def wallet_summary_alias(request: Request, store: MarketplaceStore = Depends(get_store)) -> dict[str, Any]:
+    return wallet(request, store)
+
+
 @router.get("/wallet/transactions")
 def wallet_transactions(request: Request, store: MarketplaceStore = Depends(get_store)) -> dict[str, Any]:
     user_id = _require_current_user_id(store, request)
@@ -1573,6 +2602,11 @@ def membership_subscription(request: Request, store: MarketplaceStore = Depends(
     })
 
 
+@router.get("/memberships/current")
+def membership_current_alias(request: Request, store: MarketplaceStore = Depends(get_store)) -> dict[str, Any]:
+    return membership_subscription(request, store)
+
+
 @router.post("/membership/upgrade")
 def membership_upgrade(request: Request, payload: MembershipUpgradeRequest, store: MarketplaceStore = Depends(get_store)) -> dict[str, Any]:
     plan = store.find_first("membership_plan", predicate=lambda item: item["payload"].get("plan_key") == payload.plan_key)
@@ -1592,6 +2626,23 @@ def membership_upgrade(request: Request, payload: MembershipUpgradeRequest, stor
         "updated_at": now,
     }
     store.upsert_record("membership_subscription", subscription_id, subscription_payload, parent_id=user_id)
+    price_minor = int(plan["payload"].get("price_minor") or 0)
+    if price_minor:
+        store.append_wallet_transaction(
+            user_id,
+            transaction_type="membership_upgrade",
+            amount_minor=-price_minor,
+            reference_type="membership_plan",
+            reference_id=plan["entity_id"],
+        )
+    store.create_notification(
+        user_id,
+        notification_type="membership",
+        title="Membership updated",
+        body=f"You are now on the {plan['payload'].get('title') or payload.plan_key} plan.",
+        entity_type="membership_subscription",
+        entity_id=subscription_id,
+    )
     return ok(request, {
         "id": subscription_id,
         "user_id": user_id,
@@ -1648,6 +2699,15 @@ def read_notifications(request: Request, payload: NotificationReadRequest, store
     return ok(request, {"read_count": updated_count, "read_at": read_at})
 
 
+@router.post("/notifications/read-all")
+def read_notifications_alias(
+    request: Request,
+    payload: NotificationReadRequest | None = None,
+    store: MarketplaceStore = Depends(get_store),
+) -> dict[str, Any]:
+    return read_notifications(request, payload or NotificationReadRequest(), store)
+
+
 @router.patch("/notifications/{notification_id}/read")
 def read_notification(request: Request, notification_id: str, payload: NotificationReadRequest, store: MarketplaceStore = Depends(get_store)) -> dict[str, Any]:
     user_id = _require_current_user_id(store, request)
@@ -1670,6 +2730,36 @@ def page_orders(request: Request, store: MarketplaceStore = Depends(get_store)) 
 def page_order_detail(request: Request, order_id: str, store: MarketplaceStore = Depends(get_store)) -> dict[str, Any]:
     order = order_detail(request, order_id, store)["data"]
     return ok(request, _page("order_detail", title="订单详情", subtitle="查看支付、物流与收货进度。", resources=order))
+
+
+@router.get("/pages/orders/{order_id}/success")
+def page_order_success(request: Request, order_id: str, store: MarketplaceStore = Depends(get_store)) -> dict[str, Any]:
+    order = order_detail(request, order_id, store)["data"]
+    return ok(
+        request,
+        _page(
+            "order_success",
+            title="Order placed",
+            subtitle="The order is now waiting for the seller to ship it.",
+            resources=order,
+        ),
+    )
+
+
+@router.get("/pages/reviews/{order_id}")
+def page_review_order(request: Request, order_id: str, store: MarketplaceStore = Depends(get_store)) -> dict[str, Any]:
+    order = order_detail(request, order_id, store)["data"]
+    draft = order_review_draft(request, order_id, store)["data"]
+    tags = review_tags(request, store)["data"]
+    return ok(
+        request,
+        _page(
+            "review_order",
+            title="Review order",
+            subtitle="Rate the completed order and leave structured feedback.",
+            resources={"order": order, "draft": draft, "tags": tags},
+        ),
+    )
 
 
 @router.get("/pages/wallet")

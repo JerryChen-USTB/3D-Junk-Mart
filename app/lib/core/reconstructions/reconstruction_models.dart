@@ -42,6 +42,7 @@ class ReconstructionTask {
     this.viewerTranslationDone = false,
     this.viewerInitialViewDone = false,
     this.viewerAnimationApproved = false,
+    this.coverImageUrl,
   });
 
   final String taskId;
@@ -86,6 +87,7 @@ class ReconstructionTask {
   final bool viewerTranslationDone;
   final bool viewerInitialViewDone;
   final bool viewerAnimationApproved;
+  final String? coverImageUrl;
 
   bool get isReady => status == 'ready';
   bool get isFailed => status == 'failed';
@@ -203,6 +205,13 @@ class ReconstructionTask {
       viewerTranslationDone: json['viewer_translation_done'] == true,
       viewerInitialViewDone: json['viewer_initial_view_done'] == true,
       viewerAnimationApproved: json['viewer_animation_approved'] == true,
+      coverImageUrl: _resolveUrl(
+        _stringOrNull(
+          (json['cover_media'] as Map?)?['thumbnail_url']?.toString() ??
+              (json['cover_media'] as Map?)?['url']?.toString(),
+        ),
+        apiRoot,
+      ),
     );
   }
 }
@@ -292,7 +301,17 @@ String? _resolveUrl(String? raw, Uri apiRoot) {
   if (raw == null || raw.isEmpty) {
     return null;
   }
-  return apiRoot.resolve(raw).toString();
+  final resolved = apiRoot.resolve(raw);
+  // When the base URL is proxied (e.g. /proxy/storage/...) but the resolved
+  // URL lost the /proxy prefix (because `raw` was an absolute path like
+  // /storage/...), re-insert the proxy prefix so the request goes through
+  // the local backend proxy instead of the static file mount.
+  if (apiRoot.path.contains('/proxy/') &&
+      resolved.path.startsWith('/storage/') &&
+      !resolved.path.startsWith('/proxy/')) {
+    return resolved.replace(path: '/proxy${resolved.path}').toString();
+  }
+  return resolved.toString();
 }
 
 String? _stringOrNull(Object? value) {

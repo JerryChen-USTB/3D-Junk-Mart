@@ -29,10 +29,7 @@ class SellPage extends StatelessWidget {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 128),
         children: [
-          EditorialScreenHeader(
-            title: '发布 3D 商品',
-            onBack: onGoHome,
-          ),
+          EditorialScreenHeader(title: '发布 3D 商品', onBack: onGoHome),
           const SizedBox(height: 16),
           Container(
             padding: const EdgeInsets.all(18),
@@ -49,14 +46,14 @@ class SellPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  '拍摄商品环绕视频，自动生成 3D 展示模型，发布到市场。',
+                  '拍摄商品环绕视频，自动生成 3D 展示模型，再发布到市场。',
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
                 const SizedBox(height: 14),
-                Wrap(
+                const Wrap(
                   spacing: 8,
                   runSpacing: 8,
-                  children: const [
+                  children: [
                     EditorialPill(label: '智能建模', filled: true),
                     EditorialPill(label: '背景去除'),
                     EditorialPill(label: '展示校准'),
@@ -84,8 +81,7 @@ class SellPage extends StatelessWidget {
           const SizedBox(height: 16),
           EditorialActionCard(
             title: '任务管理',
-            subtitle:
-                '查看建模进度、继续未完成的任务、或查看已发布的商品',
+            subtitle: '查看建模进度、继续未完成的任务，或查看已发布的商品',
             icon: Icons.inventory_2_rounded,
             onTap: () {
               Navigator.of(context).push(

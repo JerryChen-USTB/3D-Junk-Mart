@@ -1,0 +1,10 @@
+[Unit]
+Description=Periodic 3DGS marketplace health checks
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

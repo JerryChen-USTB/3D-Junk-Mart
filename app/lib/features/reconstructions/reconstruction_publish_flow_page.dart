@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -7,6 +8,7 @@ import '../../core/api/api_client.dart';
 import '../../core/reconstructions/reconstruction_models.dart';
 import '../../core/reconstructions/reconstructions_repository.dart';
 import '../../theme/app_colors.dart';
+import '../media/cover_crop_page.dart';
 import '../viewer/viewer_page.dart';
 import 'reconstruction_task_status_page.dart';
 
@@ -42,6 +44,7 @@ class _ReconstructionPublishFlowPageState
   late final ReconstructionsRepository _repository;
   Timer? _timer;
   XFile? _selectedVideo;
+  XFile? _selectedCover;
   ReconstructionTask? _task;
   bool _isLoadingTask = false;
   bool _isCreatingTask = false;
@@ -181,6 +184,21 @@ class _ReconstructionPublishFlowPageState
     }
     setState(() {
       _selectedVideo = video;
+      _errorMessage = null;
+    });
+  }
+
+  Future<void> _pickCover(ImageSource source) async {
+    final image = await pickAndCropCoverImage(
+      context,
+      picker: _picker,
+      source: source,
+    );
+    if (image == null || !mounted) {
+      return;
+    }
+    setState(() {
+      _selectedCover = image;
       _errorMessage = null;
     });
   }
@@ -345,7 +363,7 @@ class _ReconstructionPublishFlowPageState
   }
 
   Future<void> _publishTask() async {
-    final task = _task;
+    var task = _task;
     if (task == null) {
       return;
     }
@@ -354,6 +372,20 @@ class _ReconstructionPublishFlowPageState
       _errorMessage = null;
     });
     try {
+      if (_selectedCover != null) {
+        task = await _repository.uploadCover(
+          taskId: task.taskId,
+          image: _selectedCover!,
+          bearerToken: widget.accessToken,
+        );
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _selectedCover = null;
+          _applyTask(task!);
+        });
+      }
       final published = await _repository.publishTask(
         task.taskId,
         bearerToken: widget.accessToken,
@@ -491,6 +523,10 @@ class _ReconstructionPublishFlowPageState
                       task: task,
                       canPublish: canPublish,
                       isPublishing: _isPublishing,
+                      selectedCover: _selectedCover,
+                      coverImageUrl: task.coverImageUrl,
+                      onPickCoverCamera: () => _pickCover(ImageSource.camera),
+                      onPickCoverGallery: () => _pickCover(ImageSource.gallery),
                       onPublish: _publishTask,
                       onOpenListing: task.hasPublishedListing
                           ? _openPublishedListing
@@ -796,10 +832,10 @@ class _TrainingCard extends StatelessWidget {
               initialValue: selectedQualityProfile,
               decoration: const InputDecoration(labelText: '质量档位'),
               items: const [
-                DropdownMenuItem(value: 'fast', child: Text('Fast')),
-                DropdownMenuItem(value: 'balanced', child: Text('Balanced')),
-                DropdownMenuItem(value: 'quality', child: Text('Quality')),
-                DropdownMenuItem(value: 'raw', child: Text('Raw')),
+                DropdownMenuItem(value: 'fast', child: Text('快速')),
+                DropdownMenuItem(value: 'balanced', child: Text('均衡')),
+                DropdownMenuItem(value: 'quality', child: Text('高质量')),
+                DropdownMenuItem(value: 'raw', child: Text('原始模式')),
               ],
               onChanged: enabled && !isStarting
                   ? (value) {
@@ -832,7 +868,7 @@ class _TrainingCard extends StatelessWidget {
               value: objectMasking,
               onChanged: enabled && !isStarting ? onObjectMaskingChanged : null,
               contentPadding: EdgeInsets.zero,
-              title: const Text('Object Masking'),
+              title: const Text('主体抠图'),
               subtitle: const Text('训练前先做主体/背景交互式分割。'),
             ),
             const SizedBox(height: 12),
@@ -888,9 +924,7 @@ class _TaskMonitorCard extends StatelessWidget {
             FilledButton.tonalIcon(
               onPressed: onOpenStatus,
               icon: const Icon(Icons.dashboard_customize_rounded),
-              label: Text(
-                task.needsMaskInteraction ? '进入 Mask 交互页' : '打开任务状态页',
-              ),
+              label: Text(task.needsMaskInteraction ? '进入抠图交互页' : '打开任务状态页'),
             ),
           ],
         ),
@@ -1035,6 +1069,10 @@ class _PublishCard extends StatelessWidget {
     required this.task,
     required this.canPublish,
     required this.isPublishing,
+    required this.selectedCover,
+    required this.coverImageUrl,
+    required this.onPickCoverCamera,
+    required this.onPickCoverGallery,
     required this.onPublish,
     this.onOpenListing,
   });
@@ -1042,21 +1080,45 @@ class _PublishCard extends StatelessWidget {
   final ReconstructionTask task;
   final bool canPublish;
   final bool isPublishing;
+  final XFile? selectedCover;
+  final String? coverImageUrl;
+  final VoidCallback onPickCoverCamera;
+  final VoidCallback onPickCoverGallery;
   final VoidCallback onPublish;
   final VoidCallback? onOpenListing;
 
   @override
   Widget build(BuildContext context) {
+    final coverWidget = selectedCover != null
+        ? ClipRRect(
+            borderRadius: BorderRadius.circular(18),
+            child: Image.file(
+              File(selectedCover!.path),
+              height: 160,
+              width: double.infinity,
+              fit: BoxFit.cover,
+            ),
+          )
+        : coverImageUrl != null
+        ? ClipRRect(
+            borderRadius: BorderRadius.circular(18),
+            child: Image.network(
+              coverImageUrl!,
+              height: 160,
+              width: double.infinity,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => const _CoverPlaceholder(),
+            ),
+          )
+        : const _CoverPlaceholder();
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              '5. 发布商品',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
+            Text('5. 发布商品', style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 8),
             Text(
               task.isPublished
@@ -1064,6 +1126,25 @@ class _PublishCard extends StatelessWidget {
                   : task.viewerWorkflowComplete
                   ? '3D 展示校准已完成，可以发布商品了。'
                   : '建议先完成 3D 展示校准，再执行最终发布。',
+            ),
+            const SizedBox(height: 12),
+            coverWidget,
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: isPublishing ? null : onPickCoverCamera,
+                  icon: const Icon(Icons.photo_camera_rounded),
+                  label: const Text('拍摄封面'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: isPublishing ? null : onPickCoverGallery,
+                  icon: const Icon(Icons.photo_library_rounded),
+                  label: const Text('上传图片'),
+                ),
+              ],
             ),
             const SizedBox(height: 12),
             FilledButton.icon(
@@ -1076,9 +1157,7 @@ class _PublishCard extends StatelessWidget {
                     )
                   : const Icon(Icons.publish_rounded),
               label: Text(
-                isPublishing
-                    ? '发布中...'
-                    : (task.isPublished ? '已发布' : '发布商品'),
+                isPublishing ? '发布中...' : (task.isPublished ? '已发布' : '发布商品'),
               ),
             ),
             if (task.hasPublishedListing && onOpenListing != null) ...[
@@ -1091,6 +1170,31 @@ class _PublishCard extends StatelessWidget {
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _CoverPlaceholder extends StatelessWidget {
+  const _CoverPlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 160,
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: AppColors.surfaceSoft,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.textMuted.withValues(alpha: 0.18)),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: const [
+          Icon(Icons.image_outlined, size: 36, color: AppColors.textMuted),
+          SizedBox(height: 8),
+          Text('未设置商品封面'),
+        ],
       ),
     );
   }

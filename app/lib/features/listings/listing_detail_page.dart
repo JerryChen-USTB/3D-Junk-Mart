@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/listings/listing_models.dart';
 import '../../core/listings/listings_repository.dart';
+import '../../core/session/app_session.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/editorial_widgets.dart';
 import '../viewer/viewer_page.dart';
@@ -10,6 +11,7 @@ class ListingDetailPage extends StatefulWidget {
   const ListingDetailPage({
     super.key,
     required this.repository,
+    required this.session,
     required this.listingId,
     required this.onOpenChat,
     required this.onOpenOrder,
@@ -17,6 +19,7 @@ class ListingDetailPage extends StatefulWidget {
   });
 
   final ListingsRepository repository;
+  final AppSession session;
   final String listingId;
   final VoidCallback onOpenChat;
   final VoidCallback onOpenOrder;
@@ -64,6 +67,10 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
             }
 
             final detail = snapshot.data!;
+            final currentUserId = widget.session.user['id']?.toString() ?? '';
+            final isOwner =
+                detail.summary.sellerId.isNotEmpty &&
+                detail.summary.sellerId == currentUserId;
 
             return RefreshIndicator(
               onRefresh: _refresh,
@@ -71,7 +78,7 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 128),
                 children: [
                   EditorialScreenHeader(
-                    title: 'Listing detail',
+                    title: '商品详情',
                     onBack: () => Navigator.pop(context),
                     trailing: EditorialRoundIconButton(
                       icon: Icons.share_rounded,
@@ -83,32 +90,48 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
                   const SizedBox(height: 16),
                   _PriceSummary(detail: detail),
                   const SizedBox(height: 16),
-                  _SellerSummary(detail: detail, onOpenChat: widget.onOpenChat),
+                  _SellerSummary(
+                    detail: detail,
+                    isOwner: isOwner,
+                    onOpenChat: widget.onOpenChat,
+                  ),
+                  if (isOwner) ...[
+                    const SizedBox(height: 16),
+                    _SectionCard(
+                      title: '商品状态',
+                      child: Text(
+                        '这是你发布的商品，当前页面不会显示联系、购买和评价等买家操作。',
+                        style: Theme.of(
+                          context,
+                        ).textTheme.bodyMedium?.copyWith(height: 1.5),
+                      ),
+                    ),
+                  ],
                   if (detail.specs.isNotEmpty) ...[
                     const SizedBox(height: 16),
                     _SpecsSection(specs: detail.specs),
                   ],
                   const SizedBox(height: 16),
                   _SectionCard(
-                    title: 'Description',
+                    title: '商品描述',
                     child: Text(
                       detail.description,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            height: 1.55,
-                          ),
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodyMedium?.copyWith(height: 1.55),
                     ),
                   ),
                   const SizedBox(height: 16),
                   _SectionCard(
-                    title: '3D preview',
+                    title: '3D 预览',
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
                           detail.preview3d.isReady
-                              ? 'The model is ready and can be explored directly inside the product page.'
+                              ? '3D 模型已准备完成，可以直接查看。'
                               : detail.preview3d.statusMessage ??
-                                  'The 3D model is still preparing, so the app shows the cover and status first.',
+                                    '3D 模型仍在处理中，请稍后再试。',
                           style: Theme.of(context).textTheme.bodyMedium,
                         ),
                         const SizedBox(height: 12),
@@ -116,7 +139,8 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
                           spacing: 8,
                           runSpacing: 8,
                           children: [
-                            for (final badge in detail.preview3d.placeholderBadges)
+                            for (final badge
+                                in detail.preview3d.placeholderBadges)
                               EditorialPill(
                                 label: badge,
                                 backgroundColor: AppColors.surfaceSoft,
@@ -138,84 +162,26 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
           },
         ),
       ),
-      bottomNavigationBar: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-          child: Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.92),
-              borderRadius: BorderRadius.circular(28),
-              boxShadow: const [
-                BoxShadow(
-                  color: Color(0x10000000),
-                  blurRadius: 24,
-                  offset: Offset(0, -2),
-                ),
-              ],
-            ),
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final compact = constraints.maxWidth < 360;
-                if (compact) {
-                  return Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      FilledButton(
-                        onPressed: widget.onOpenOrder,
-                        child: const Text('Buy now'),
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: OutlinedButton(
-                              onPressed: widget.onOpenChat,
-                              child: const Text('Contact'),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: OutlinedButton(
-                              onPressed: widget.onOpenReview,
-                              child: const Text('Reviews'),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  );
-                }
-
-                return Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: widget.onOpenChat,
-                        child: const Text('Contact'),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: widget.onOpenReview,
-                        child: const Text('Reviews'),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: FilledButton(
-                        onPressed: widget.onOpenOrder,
-                        child: const Text('Buy now'),
-                      ),
-                    ),
-                  ],
-                );
-              },
-            ),
-          ),
-        ),
+      bottomNavigationBar: FutureBuilder<ListingDetail>(
+        future: _detailFuture,
+        builder: (context, snapshot) {
+          final detail = snapshot.data;
+          if (detail == null) {
+            return const SizedBox.shrink();
+          }
+          final currentUserId = widget.session.user['id']?.toString() ?? '';
+          final isOwner =
+              detail.summary.sellerId.isNotEmpty &&
+              detail.summary.sellerId == currentUserId;
+          if (isOwner) {
+            return const SizedBox.shrink();
+          }
+          return _DetailActionBar(
+            onOpenChat: widget.onOpenChat,
+            onOpenOrder: widget.onOpenOrder,
+            onOpenReview: widget.onOpenReview,
+          );
+        },
       ),
     );
   }
@@ -236,7 +202,11 @@ class _DetailHero extends StatelessWidget {
         color: AppColors.primary,
         borderRadius: BorderRadius.circular(30),
         boxShadow: const [
-          BoxShadow(color: Color(0x22000000), blurRadius: 24, offset: Offset(0, 12)),
+          BoxShadow(
+            color: Color(0x22000000),
+            blurRadius: 24,
+            offset: Offset(0, 12),
+          ),
         ],
       ),
       clipBehavior: Clip.antiAlias,
@@ -257,7 +227,7 @@ class _DetailHero extends StatelessWidget {
                   left: 14,
                   top: 14,
                   child: EditorialPill(
-                    label: detail.preview3d.isReady ? '3D ready' : '3D preview',
+                    label: detail.preview3d.isReady ? '3D 已就绪' : '3D 预览',
                     backgroundColor: Colors.black.withValues(alpha: 0.52),
                     foregroundColor: Colors.white,
                     icon: Icons.view_in_ar_rounded,
@@ -268,8 +238,8 @@ class _DetailHero extends StatelessWidget {
           : Stack(
               fit: StackFit.expand,
               children: [
-                DecoratedBox(
-                  decoration: const BoxDecoration(
+                const DecoratedBox(
+                  decoration: BoxDecoration(
                     gradient: LinearGradient(
                       colors: [Color(0xFF1A1A1A), Color(0xFF4E5C4B)],
                       begin: Alignment.topLeft,
@@ -281,7 +251,7 @@ class _DetailHero extends StatelessWidget {
                   Image.network(
                     detail.preview3d.coverImageUrl!,
                     fit: BoxFit.cover,
-                    errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
                   ),
                 DecoratedBox(
                   decoration: BoxDecoration(
@@ -311,17 +281,16 @@ class _DetailHero extends StatelessWidget {
                     children: [
                       Text(
                         detail.preview3d.placeholderTitle,
-                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                              color: Colors.white,
-                            ),
+                        style: Theme.of(context).textTheme.headlineSmall
+                            ?.copyWith(color: Colors.white),
                       ),
                       const SizedBox(height: 6),
                       Text(
                         detail.preview3d.placeholderSubtitle,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: Colors.white.withValues(alpha: 0.82),
-                              height: 1.45,
-                            ),
+                          color: Colors.white.withValues(alpha: 0.82),
+                          height: 1.45,
+                        ),
                       ),
                     ],
                   ),
@@ -345,7 +314,11 @@ class _PriceSummary extends StatelessWidget {
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(26),
         boxShadow: const [
-          BoxShadow(color: Color(0x10000000), blurRadius: 24, offset: Offset(0, 10)),
+          BoxShadow(
+            color: Color(0x10000000),
+            blurRadius: 24,
+            offset: Offset(0, 10),
+          ),
         ],
       ),
       child: Column(
@@ -358,21 +331,21 @@ class _PriceSummary extends StatelessWidget {
             children: [
               Text(
                 detail.summary.priceLabel,
-                style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                      color: AppColors.coral,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.displaySmall?.copyWith(color: AppColors.coral),
               ),
-              if (detail.summary.originalPriceLabel != 'Negotiable')
+              if (detail.summary.originalPriceLabel != '面议')
                 Text(
                   detail.summary.originalPriceLabel,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: AppColors.textMuted,
-                        decoration: TextDecoration.lineThrough,
-                      ),
+                    color: AppColors.textMuted,
+                    decoration: TextDecoration.lineThrough,
+                  ),
                 ),
               if (detail.summary.has3dBadge)
                 EditorialPill(
-                  label: '3D enabled',
+                  label: '3D 展示',
                   backgroundColor: const Color(0xFFE4F5EE),
                   foregroundColor: AppColors.mint,
                 ),
@@ -390,6 +363,23 @@ class _PriceSummary extends StatelessWidget {
               style: Theme.of(context).textTheme.bodyMedium,
             ),
           ],
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              const Icon(
+                Icons.location_on_rounded,
+                size: 16,
+                color: AppColors.textMuted,
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  detail.summary.location,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
@@ -397,9 +387,14 @@ class _PriceSummary extends StatelessWidget {
 }
 
 class _SellerSummary extends StatelessWidget {
-  const _SellerSummary({required this.detail, required this.onOpenChat});
+  const _SellerSummary({
+    required this.detail,
+    required this.isOwner,
+    required this.onOpenChat,
+  });
 
   final ListingDetail detail;
+  final bool isOwner;
   final VoidCallback onOpenChat;
 
   @override
@@ -413,14 +408,18 @@ class _SellerSummary extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 64,
-            height: 64,
-            decoration: BoxDecoration(
-              color: AppColors.surfaceRaised,
-              borderRadius: BorderRadius.circular(22),
-            ),
-            child: const Icon(Icons.person_rounded, color: AppColors.textMuted),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(20),
+            child: detail.summary.sellerAvatarUrl != null
+                ? Image.network(
+                    detail.summary.sellerAvatarUrl!,
+                    width: 64,
+                    height: 64,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) =>
+                        _SellerAvatarFallback(name: detail.summary.sellerName),
+                  )
+                : _SellerAvatarFallback(name: detail.summary.sellerName),
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -438,9 +437,15 @@ class _SellerSummary extends StatelessWidget {
                     ),
                     if (detail.sellerScore != null)
                       EditorialPill(
-                        label: 'Score ${detail.sellerScore}',
+                        label: '信用 ${detail.sellerScore}',
                         backgroundColor: const Color(0xFFE0F7F7),
                         foregroundColor: AppColors.mint,
+                      ),
+                    if (isOwner)
+                      const EditorialPill(
+                        label: '我的商品',
+                        backgroundColor: Color(0xFFFFF2C4),
+                        foregroundColor: AppColors.primary,
                       ),
                   ],
                 ),
@@ -469,9 +474,34 @@ class _SellerSummary extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(width: 10),
-          TextButton(onPressed: onOpenChat, child: const Text('Contact')),
+          if (!isOwner) ...[
+            const SizedBox(width: 10),
+            TextButton(onPressed: onOpenChat, child: const Text('联系')),
+          ],
         ],
+      ),
+    );
+  }
+}
+
+class _SellerAvatarFallback extends StatelessWidget {
+  const _SellerAvatarFallback({required this.name});
+
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 64,
+      height: 64,
+      decoration: BoxDecoration(
+        color: AppColors.surfaceRaised,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        name.isNotEmpty ? name.characters.first : '卖',
+        style: Theme.of(context).textTheme.headlineSmall,
       ),
     );
   }
@@ -536,7 +566,11 @@ class _SectionCard extends StatelessWidget {
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(24),
         boxShadow: const [
-          BoxShadow(color: Color(0x10000000), blurRadius: 24, offset: Offset(0, 10)),
+          BoxShadow(
+            color: Color(0x10000000),
+            blurRadius: 24,
+            offset: Offset(0, 10),
+          ),
         ],
       ),
       child: Column(
@@ -546,6 +580,101 @@ class _SectionCard extends StatelessWidget {
           const SizedBox(height: 12),
           child,
         ],
+      ),
+    );
+  }
+}
+
+class _DetailActionBar extends StatelessWidget {
+  const _DetailActionBar({
+    required this.onOpenChat,
+    required this.onOpenOrder,
+    required this.onOpenReview,
+  });
+
+  final VoidCallback onOpenChat;
+  final VoidCallback onOpenOrder;
+  final VoidCallback onOpenReview;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.92),
+            borderRadius: BorderRadius.circular(28),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x10000000),
+                blurRadius: 24,
+                offset: Offset(0, -2),
+              ),
+            ],
+          ),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final compact = constraints.maxWidth < 360;
+              if (compact) {
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    FilledButton(
+                      onPressed: onOpenOrder,
+                      child: const Text('立即购买'),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: onOpenChat,
+                            child: const Text('联系卖家'),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: onOpenReview,
+                            child: const Text('查看评价'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                );
+              }
+
+              return Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: onOpenChat,
+                      child: const Text('联系卖家'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: onOpenReview,
+                      child: const Text('查看评价'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: onOpenOrder,
+                      child: const Text('立即购买'),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
       ),
     );
   }
@@ -565,25 +694,28 @@ class _DetailErrorState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.error_outline_rounded, size: 52, color: AppColors.coral),
+            const Icon(
+              Icons.error_outline_rounded,
+              size: 52,
+              color: AppColors.coral,
+            ),
             const SizedBox(height: 12),
-            Text(
-              'Failed to load listing detail',
-              style: Theme.of(context).textTheme.headlineSmall,
-            ),
+            Text('商品详情加载失败', style: Theme.of(context).textTheme.headlineSmall),
             const SizedBox(height: 8),
-            Text(
-              'Please retry after checking the backend response.',
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
+            Text('请检查网络后重试。', style: Theme.of(context).textTheme.bodyMedium),
             const SizedBox(height: 16),
             Wrap(
               spacing: 10,
               runSpacing: 10,
               alignment: WrapAlignment.center,
               children: [
-                OutlinedButton(onPressed: onBack, child: const Text('Back')),
-                FilledButton(onPressed: onRetry, child: const Text('Retry')),
+                OutlinedButton(onPressed: onBack, child: const Text('返回')),
+                FilledButton(
+                  onPressed: () {
+                    onRetry();
+                  },
+                  child: const Text('重试'),
+                ),
               ],
             ),
           ],

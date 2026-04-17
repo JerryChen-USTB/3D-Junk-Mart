@@ -1,0 +1,17 @@
+[Unit]
+Description=3DGS Trainer Service
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/3dgs-marketplace/repo
+EnvironmentFile=/etc/3dgs-marketplace/trainer.env
+ExecStart=/opt/conda/envs/3dgs_app/bin/python -m uvicorn trainer_service.app:app --host 127.0.0.1 --port 9000
+Restart=always
+RestartSec=5
+LogsDirectory=3dgs-marketplace
+
+[Install]
+WantedBy=multi-user.target

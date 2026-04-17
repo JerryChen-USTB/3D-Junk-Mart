@@ -22,12 +22,16 @@ storage/uploads/*
 storage/processed/*
 storage/models/*
 storage/seed/*
+storage/avatars/*
+storage/listing_covers/*
 !storage/.gitkeep
 !storage/db/.gitkeep
 !storage/tasks/.gitkeep
 !storage/uploads/.gitkeep
 !storage/processed/.gitkeep
 !storage/models/.gitkeep
+!storage/avatars/.gitkeep
+!storage/listing_covers/.gitkeep
 
 # GitHub PAT (do not commit)
 github_pat.txt

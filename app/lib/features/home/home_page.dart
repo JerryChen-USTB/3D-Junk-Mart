@@ -23,6 +23,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   late Future<List<ListingSummary>> _listingsFuture;
+  final ListingPreviewController _previewController = ListingPreviewController();
 
   @override
   void initState() {
@@ -30,8 +31,15 @@ class _HomePageState extends State<HomePage> {
     _listingsFuture = widget.repository.fetchListings(limit: 12);
   }
 
+  @override
+  void dispose() {
+    _previewController.dispose();
+    super.dispose();
+  }
+
   Future<void> _refresh() async {
     final future = widget.repository.fetchListings(limit: 12);
+    _previewController.clear();
     setState(() {
       _listingsFuture = future;
     });
@@ -56,15 +64,11 @@ class _HomePageState extends State<HomePage> {
                 const SizedBox(height: 16),
                 const ListingHeroBanner(
                   title: '3D 二手商城',
-                  subtitle:
-                      '浏览二手好物，支持 3D 展示，所见即所得。',
+                  subtitle: '浏览二手好物，支持 3D 展示，所见即所得。',
                   badge: 'Junk Mart',
                 ),
                 const SizedBox(height: 18),
-                Text(
-                  '推荐商品',
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
+                Text('推荐商品', style: Theme.of(context).textTheme.headlineSmall),
                 const SizedBox(height: 12),
                 if (snapshot.connectionState == ConnectionState.waiting &&
                     listings.isEmpty)
@@ -82,7 +86,7 @@ class _HomePageState extends State<HomePage> {
                         Container(
                           width: 80,
                           height: 80,
-                          decoration: BoxDecoration(
+                          decoration: const BoxDecoration(
                             color: AppColors.surface,
                             shape: BoxShape.circle,
                           ),
@@ -99,10 +103,9 @@ class _HomePageState extends State<HomePage> {
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          '去“发布”页创建你的第一个 3D 商品吧',
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: AppColors.textMuted,
-                              ),
+                          '去“发布”页创建你的第一个 3D 商品吧。',
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: AppColors.textMuted),
                         ),
                       ],
                     ),
@@ -111,6 +114,7 @@ class _HomePageState extends State<HomePage> {
                   _ListingGrid(
                     listings: listings,
                     onOpenListing: widget.onOpenListing,
+                    previewController: _previewController,
                   ),
               ],
             );
@@ -170,7 +174,10 @@ class _HomeHeader extends StatelessWidget {
         const CircleAvatar(
           radius: 21,
           backgroundColor: AppColors.surface,
-          child: Icon(Icons.notifications_none_rounded, color: AppColors.textMuted),
+          child: Icon(
+            Icons.notifications_none_rounded,
+            color: AppColors.textMuted,
+          ),
         ),
       ],
     );
@@ -181,10 +188,12 @@ class _ListingGrid extends StatelessWidget {
   const _ListingGrid({
     required this.listings,
     required this.onOpenListing,
+    required this.previewController,
   });
 
   final List<ListingSummary> listings;
   final ValueChanged<String> onOpenListing;
+  final ListingPreviewController previewController;
 
   @override
   Widget build(BuildContext context) {
@@ -201,6 +210,7 @@ class _ListingGrid extends StatelessWidget {
               child: ListingCard(
                 listing: listing,
                 tall: index.isOdd,
+                previewController: previewController,
                 onTap: () => onOpenListing(listing.id),
               ),
             );
@@ -228,15 +238,20 @@ class _ErrorPanel extends StatelessWidget {
         children: [
           const Icon(Icons.cloud_off_rounded, size: 40, color: AppColors.coral),
           const SizedBox(height: 10),
-          Text('Failed to load listings', style: Theme.of(context).textTheme.titleMedium),
+          Text('商品加载失败', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 6),
           Text(
-            'The backend listing feed is unstable right now, so we retry directly against the server.',
+            '市场列表暂时不可用，请直接重试。',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 12),
-          FilledButton(onPressed: onRetry, child: const Text('Reload')),
+          FilledButton(
+            onPressed: () {
+              onRetry();
+            },
+            child: const Text('重新加载'),
+          ),
         ],
       ),
     );

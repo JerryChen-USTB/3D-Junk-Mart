@@ -13,19 +13,19 @@ class FakeApiClient extends ApiClient {
 
   final List<Map<String, dynamic>> _listings = <Map<String, dynamic>>[
     <String, dynamic>{
-      'id': 'listing_3dgs_demo',
-      'title': '3DGS Demo Listing',
-      'subtitle': '3D-ready sample product',
+      'id': 'listing_demo_3d_camera',
+      'title': '3D Camera Demo',
+      'subtitle': '3D-ready second-hand camera',
       'price': <String, dynamic>{'amount_minor': 29900, 'currency': 'CNY'},
       'original_price': <String, dynamic>{
         'amount_minor': 49900,
         'currency': 'CNY',
       },
-      'status': 'draft',
+      'status': 'live',
       'cover_media': <String, dynamic>{
         'url': '/storage/seed/listings/3dgs_cover.jpg',
       },
-      'location': 'Remote',
+      'location': 'Shanghai',
       'badges': <String>['3d-ready'],
       'seller': <String, dynamic>{'display_name': 'Demo Seller'},
     },
@@ -44,9 +44,9 @@ class FakeApiClient extends ApiClient {
           'location': 'Beijing',
           'sesame_credit_score': 712,
           'vip_level': 'gold',
-          'follower_count': 0,
-          'following_count': 0,
-          'positive_rate': 1.0,
+          'follower_count': 4,
+          'following_count': 7,
+          'positive_rate': 98,
         },
         'session': <String, dynamic>{
           'id': 'session_demo_buyer',
@@ -54,7 +54,7 @@ class FakeApiClient extends ApiClient {
           'access_token': 'demo-access-token',
           'refresh_token': 'demo-refresh-token',
           'device_name': 'Demo Device',
-          'device_platform': 'web',
+          'device_platform': 'android',
           'access_token_expires_at': '2026-04-14T21:52:04.091655+00:00',
           'refresh_token_expires_at': '2026-04-14T21:52:04.091655+00:00',
           'is_new_user': isNewUser,
@@ -87,11 +87,11 @@ class FakeApiClient extends ApiClient {
       return _sessionEnvelope();
     }
 
-    if (path == '/auth/logout') {
+    if (path == '/users/me') {
       return ApiEnvelope<Map<String, dynamic>>(
         code: 0,
         message: 'ok',
-        data: <String, dynamic>{},
+        data: _sessionEnvelope().data['profile'] as Map<String, dynamic>,
         meta: const <String, dynamic>{},
       );
     }
@@ -118,49 +118,29 @@ class FakeApiClient extends ApiClient {
       );
     }
 
-    if (path == '/pages/listings/listing_3dgs_demo') {
+    if (path == '/users/me/listings') {
       return ApiEnvelope<Object?>(
         code: 0,
         message: 'ok',
-        data: <String, dynamic>{
-          'page_key': 'listing_detail',
-          'resources': <String, dynamic>{
-            'listing': _listings.first,
-            'seller': <String, dynamic>{
-              'display_name': 'Demo Seller',
-              'location': 'Shanghai',
-              'bio': 'Trusted demo seller',
-              'sesame_credit_score': 756,
-            },
-            'preview_3d': <String, dynamic>{
-              'preview_status': 'ready',
-              'is_ready': true,
-              'viewer_url':
-                  'http://example.invalid/viewer/index.html?model=http://example.invalid/storage/models/demo/model.ply',
-              'placeholder': <String, dynamic>{
-                'title': '3DGS Demo Listing',
-                'subtitle': '3D-ready sample product',
-                'badges': <String>['3d-ready'],
-              },
-            },
-            'specs': <Map<String, dynamic>>[
-              <String, dynamic>{
-                'spec_key': 'Model Status',
-                'spec_value': 'Ready',
-              },
-            ],
-            'actions': <Map<String, dynamic>>[
-              <String, dynamic>{
-                'key': 'chat',
-                'title': 'Contact seller',
-                'enabled': true,
-              },
-            ],
-            'listing_payload': <String, dynamic>{
-              'description': 'Demo description for the 3D listing.',
-            },
-          },
-        },
+        data: _listings,
+        meta: const <String, dynamic>{},
+      );
+    }
+
+    if (path == '/conversations') {
+      return ApiEnvelope<Object?>(
+        code: 0,
+        message: 'ok',
+        data: const <Map<String, dynamic>>[],
+        meta: const <String, dynamic>{},
+      );
+    }
+
+    if (path == '/membership/plans') {
+      return ApiEnvelope<Object?>(
+        code: 0,
+        message: 'ok',
+        data: const <Map<String, dynamic>>[],
         meta: const <String, dynamic>{},
       );
     }
@@ -190,7 +170,7 @@ class FakeApiClient extends ApiClient {
       return ApiEnvelope<Map<String, dynamic>>(
         code: 0,
         message: 'ok',
-        data: <String, dynamic>{},
+        data: const <String, dynamic>{},
         meta: const <String, dynamic>{},
       );
     }
@@ -217,7 +197,7 @@ class InMemorySessionStore extends SessionStore {
 }
 
 void main() {
-  testWidgets('auth settings and shell flow work', (WidgetTester tester) async {
+  testWidgets('登录后可以进入我的页面并打开个人设置', (WidgetTester tester) async {
     final apiClient = FakeApiClient();
     final sessionStore = InMemorySessionStore();
 
@@ -226,7 +206,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Welcome back'), findsOneWidget);
+    expect(find.text('Junk Mart'), findsWidgets);
 
     await tester.enterText(find.byType(TextField).at(0), 'demo@example.com');
     await tester.enterText(find.byType(TextField).at(1), 'password123');
@@ -235,39 +215,37 @@ void main() {
       const Offset(0, -700),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, 'Sign in'));
+
+    await tester.tap(find.byType(FilledButton).first);
     await tester.pumpAndSettle();
 
-    expect(find.text('Home'), findsWidgets);
-    expect(find.text('Search'), findsWidgets);
-    expect(find.text('Profile'), findsWidgets);
+    expect(find.text('3D Camera Demo'), findsWidgets);
 
-    await tester.tap(find.text('Profile').last);
+    await tester.tap(find.byIcon(Icons.person_rounded).last);
     await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const PageStorageKey<String>('profile-list')),
+      findsOneWidget,
+    );
+    expect(find.text('我的'), findsWidgets);
+    expect(find.text('我的商品'), findsOneWidget);
 
     await tester.tap(find.byIcon(Icons.settings_rounded));
     await tester.pumpAndSettle();
 
-    expect(find.text('Profile settings'), findsOneWidget);
-    expect(find.text('NICKNAME'), findsOneWidget);
-    expect(find.text('BIRTH DATE'), findsOneWidget);
-    expect(find.text('AGE'), findsOneWidget);
+    expect(find.text('个人设置'), findsOneWidget);
+    expect(find.text('昵称'), findsOneWidget);
+    expect(find.text('生日'), findsOneWidget);
+    expect(find.text('年龄'), findsOneWidget);
 
     await tester.drag(
       find.byKey(const PageStorageKey<String>('profile-settings-list')),
       const Offset(0, -450),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Profile visibility'), findsOneWidget);
 
-    await tester.drag(
-      find.byKey(const PageStorageKey<String>('profile-settings-list')),
-      const Offset(0, 1000),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.byIcon(Icons.arrow_back_rounded));
-    await tester.pumpAndSettle();
-    expect(find.text('Profile'), findsWidgets);
+    expect(find.text('资料可见范围'), findsOneWidget);
   });
 }
 

@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily 3DGS marketplace backup
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target

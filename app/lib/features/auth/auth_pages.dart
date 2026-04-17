@@ -58,10 +58,7 @@ class _AuthLoginPageState extends State<AuthLoginPage> {
       return;
     }
 
-    setState(() {
-      _submitting = true;
-    });
-
+    setState(() => _submitting = true);
     try {
       await widget.onSubmit(
         identifier: _identifierController.text.trim(),
@@ -70,9 +67,7 @@ class _AuthLoginPageState extends State<AuthLoginPage> {
       );
     } finally {
       if (mounted) {
-        setState(() {
-          _submitting = false;
-        });
+        setState(() => _submitting = false);
       }
     }
   }
@@ -82,17 +77,12 @@ class _AuthLoginPageState extends State<AuthLoginPage> {
       return;
     }
 
-    setState(() {
-      _submitting = true;
-    });
-
+    setState(() => _submitting = true);
     try {
       await widget.onContinueAsGuest();
     } finally {
       if (mounted) {
-        setState(() {
-          _submitting = false;
-        });
+        setState(() => _submitting = false);
       }
     }
   }
@@ -141,20 +131,8 @@ class _AuthLoginPageState extends State<AuthLoginPage> {
                 ),
               ],
             ),
-            const SizedBox(height: 18),
-            EditorialImagePlaceholder(
-              label: 'Junk Mart',
-              subtitle: '登录后管理你的商品和订单。',
-              badge: '安全登录',
-              height: 204,
-              borderRadius: 30,
-              accentColor: AppColors.accent,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              '欢迎回来',
-              style: Theme.of(context).textTheme.displaySmall,
-            ),
+            const SizedBox(height: 24),
+            Text('欢迎回来', style: Theme.of(context).textTheme.displaySmall),
             const SizedBox(height: 8),
             Text(
               '使用注册时的手机号或邮箱登录，管理订单、消息和商品。',
@@ -166,41 +144,46 @@ class _AuthLoginPageState extends State<AuthLoginPage> {
               const SizedBox(height: 16),
               _ErrorBanner(message: widget.errorMessage!),
             ],
-            const SizedBox(height: 18),
+            const SizedBox(height: 20),
             _AuthInputField(
               controller: _identifierController,
               label: '手机号或邮箱',
-              hintText: 'you@example.com 或 138 0000 0000',
+              hintText: '请输入手机号或邮箱',
               icon: Icons.person_outline_rounded,
             ),
             const SizedBox(height: 12),
             _AuthInputField(
               controller: _passwordController,
               label: '密码',
-              hintText: '输入密码',
+              hintText: '请输入密码',
               icon: Icons.lock_outline_rounded,
               obscureText: true,
             ),
-            const SizedBox(height: 8),
-            CheckboxListTile(
-              contentPadding: EdgeInsets.zero,
-              value: _rememberDevice,
-              onChanged: _submitting
-                  ? null
-                  : (value) {
-                      setState(() {
-                        _rememberDevice = value ?? false;
-                      });
-                    },
-              title: const Text('记住本设备'),
-              subtitle: Text(
-                '保持登录状态，直到手动退出。',
-                style: Theme.of(context).textTheme.bodySmall,
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(20),
               ),
-              controlAffinity: ListTileControlAffinity.leading,
-              activeColor: AppColors.accentDeep,
+              child: CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                value: _rememberDevice,
+                onChanged: _submitting
+                    ? null
+                    : (value) {
+                        setState(() => _rememberDevice = value ?? false);
+                      },
+                title: const Text('记住本设备'),
+                subtitle: Text(
+                  '保持登录状态，直到手动退出。',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                controlAffinity: ListTileControlAffinity.leading,
+                activeColor: AppColors.accentDeep,
+              ),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 10),
             FilledButton(
               onPressed: _submitting ? null : _submit,
               child: Text(_submitting ? '登录中...' : '登录'),
@@ -217,15 +200,14 @@ class _AuthLoginPageState extends State<AuthLoginPage> {
                 Text('还没有账号？', style: Theme.of(context).textTheme.bodySmall),
                 TextButton(
                   onPressed: _submitting ? null : widget.onSwitchToRegister,
-                  child: const Text('创建账号'),
+                  child: const Text('立即注册'),
                 ),
               ],
             ),
             const SizedBox(height: 8),
             const _AuthInfoCard(
-              title: '登录后可以做什么',
-              body:
-                  '你的个人资料、消息、订单和发布草稿都会关联到同一个账号。',
+              title: '登录后可使用',
+              body: '你的个人资料、订单、聊天记录和发布内容都会关联到同一个账号。',
               icon: Icons.shield_outlined,
             ),
           ],
@@ -281,10 +263,7 @@ class _AuthRegisterPageState extends State<AuthRegisterPage> {
       return;
     }
 
-    setState(() {
-      _submitting = true;
-    });
-
+    setState(() => _submitting = true);
     try {
       await widget.onSubmit(
         displayName: _displayNameController.text.trim(),
@@ -294,9 +273,7 @@ class _AuthRegisterPageState extends State<AuthRegisterPage> {
       );
     } finally {
       if (mounted) {
-        setState(() {
-          _submitting = false;
-        });
+        setState(() => _submitting = false);
       }
     }
   }
@@ -323,12 +300,12 @@ class _AuthRegisterPageState extends State<AuthRegisterPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '创建账号',
+                        '注册账号',
                         style: Theme.of(context).textTheme.titleLarge,
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        '加入后可以发布商品、查看订单、与卖家沟通。',
+                        '注册后可以发布商品、查看订单并与买家卖家沟通。',
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ],
@@ -341,20 +318,8 @@ class _AuthRegisterPageState extends State<AuthRegisterPage> {
                 ),
               ],
             ),
-            const SizedBox(height: 18),
-            EditorialImagePlaceholder(
-              label: '创建新账号',
-              subtitle: '个人资料和商品将同时创建。',
-              badge: '注册',
-              height: 204,
-              borderRadius: 30,
-              accentColor: AppColors.surfaceRaised,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              '完善个人信息',
-              style: Theme.of(context).textTheme.displaySmall,
-            ),
+            const SizedBox(height: 24),
+            Text('完善账号信息', style: Theme.of(context).textTheme.displaySmall),
             const SizedBox(height: 8),
             Text(
               '创建账号后即可开始发布商品和浏览 3D 二手市场。',
@@ -366,25 +331,25 @@ class _AuthRegisterPageState extends State<AuthRegisterPage> {
               const SizedBox(height: 16),
               _ErrorBanner(message: widget.errorMessage!),
             ],
-            const SizedBox(height: 18),
+            const SizedBox(height: 20),
             _AuthInputField(
               controller: _displayNameController,
-              label: '显示名称',
-              hintText: '其他用户看到的名字',
+              label: '昵称',
+              hintText: '输入展示昵称',
               icon: Icons.badge_outlined,
             ),
             const SizedBox(height: 12),
             _AuthInputField(
               controller: _identifierController,
               label: '手机号或邮箱',
-              hintText: '用于登录的账号',
+              hintText: '输入手机号或邮箱',
               icon: Icons.alternate_email_rounded,
             ),
             const SizedBox(height: 12),
             _AuthInputField(
               controller: _passwordController,
               label: '密码',
-              hintText: '设置密码',
+              hintText: '设置登录密码',
               icon: Icons.lock_outline_rounded,
               obscureText: true,
             ),
@@ -396,31 +361,34 @@ class _AuthRegisterPageState extends State<AuthRegisterPage> {
               icon: Icons.lock_reset_outlined,
               obscureText: true,
             ),
-            const SizedBox(height: 8),
-            CheckboxListTile(
-              contentPadding: EdgeInsets.zero,
-              value: _acceptedTerms,
-              onChanged: _submitting
-                  ? null
-                  : (value) {
-                      setState(() {
-                        _acceptedTerms = value ?? false;
-                      });
-                    },
-              title: const Text('我同意服务条款和隐私政策'),
-              subtitle: Text(
-                '你的同意记录将与账号一起保存。',
-                style: Theme.of(context).textTheme.bodySmall,
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(20),
               ),
-              controlAffinity: ListTileControlAffinity.leading,
-              activeColor: AppColors.accentDeep,
+              child: CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                value: _acceptedTerms,
+                onChanged: _submitting
+                    ? null
+                    : (value) {
+                        setState(() => _acceptedTerms = value ?? false);
+                      },
+                title: const Text('我已阅读并同意服务条款和隐私政策'),
+                subtitle: Text(
+                  '你的同意记录会与账号一起保存。',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                controlAffinity: ListTileControlAffinity.leading,
+                activeColor: AppColors.accentDeep,
+              ),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 10),
             FilledButton(
               onPressed: (_submitting || !_acceptedTerms) ? null : _submit,
-              child: Text(
-                _submitting ? '创建中...' : '创建账号',
-              ),
+              child: Text(_submitting ? '注册中...' : '创建账号'),
             ),
             const SizedBox(height: 10),
             OutlinedButton(
@@ -430,8 +398,7 @@ class _AuthRegisterPageState extends State<AuthRegisterPage> {
             const SizedBox(height: 14),
             const _AuthInfoCard(
               title: '账号安全',
-              body:
-                  '注册时会同时创建你的用户资料和个人主页，确保信息安全。',
+              body: '注册后会同时创建你的用户资料和个人主页，方便后续发布和交易。',
               icon: Icons.data_object_rounded,
             ),
           ],
@@ -459,7 +426,7 @@ class _AuthInputField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(24),
@@ -468,29 +435,36 @@ class _AuthInputField extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            label.toUpperCase(),
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: AppColors.textMuted,
-              letterSpacing: 1.1,
-            ),
+            label,
+            style: Theme.of(
+              context,
+            ).textTheme.labelSmall?.copyWith(color: AppColors.textMuted),
           ),
-          const SizedBox(height: 10),
-          TextField(
-            controller: controller,
-            obscureText: obscureText,
-            decoration: InputDecoration(
-              prefixIcon: Icon(icon, size: 18, color: AppColors.textMuted),
-              hintText: hintText,
-              fillColor: Colors.transparent,
-              filled: false,
-              contentPadding: EdgeInsets.zero,
-              border: InputBorder.none,
-              enabledBorder: InputBorder.none,
-              focusedBorder: InputBorder.none,
-              hintStyle: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: AppColors.textMuted.withValues(alpha: 0.5),
+          const SizedBox(height: 8),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Icon(icon, size: 20, color: AppColors.textMuted),
+              const SizedBox(width: 12),
+              Expanded(
+                child: TextField(
+                  controller: controller,
+                  obscureText: obscureText,
+                  textAlignVertical: TextAlignVertical.center,
+                  decoration: InputDecoration(
+                    isDense: true,
+                    hintText: hintText,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    hintStyle: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: AppColors.textMuted.withValues(alpha: 0.5),
+                    ),
+                  ),
+                ),
               ),
-            ),
+            ],
           ),
         ],
       ),

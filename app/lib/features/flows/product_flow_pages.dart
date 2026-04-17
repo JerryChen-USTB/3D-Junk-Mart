@@ -38,14 +38,16 @@ class ProductDetailPage extends StatelessWidget {
             const SizedBox(height: 16),
             _HeroPanel(
               title: 'Vintage Leather Camera Bag',
-              subtitle: 'Backpack-friendly size, limited release, excellent condition.',
+              subtitle:
+                  'Backpack-friendly size, limited release, excellent condition.',
             ),
             const SizedBox(height: 16),
             _PricePanel(
               currentPrice: '\$245',
               oldPrice: '\$320',
               discountLabel: '70% off',
-              title: 'Vintage Leather Artisan Camera Bag - 1980s Limited Edition',
+              title:
+                  'Vintage Leather Artisan Camera Bag - 1980s Limited Edition',
             ),
             const SizedBox(height: 16),
             _SellerPanel(onOpenChat: onOpenChat),
@@ -76,24 +78,22 @@ class ProductDetailPage extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 16),
-            _InquiryCard(
-              onOpenReview: onOpenReview,
-            ),
+            _InquiryCard(onOpenReview: onOpenReview),
             const SizedBox(height: 16),
             _ActionRow(
               children: [
                 _ActionButton(
-                  label: 'Chat',
+                  label: '聊天',
                   icon: Icons.chat_bubble_rounded,
                   onPressed: onOpenChat,
                 ),
                 _ActionButton(
-                  label: 'Want',
+                  label: '想要',
                   icon: Icons.favorite_rounded,
                   onPressed: onOpenReview,
                 ),
                 _ActionButton(
-                  label: 'Buy now',
+                  label: '立即购买',
                   icon: Icons.shopping_bag_rounded,
                   filled: true,
                   onPressed: onOpenOrder,
@@ -101,10 +101,7 @@ class ProductDetailPage extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 12),
-            TextButton(
-              onPressed: onOpenSuccess,
-              child: const Text('Preview success flow'),
-            ),
+            TextButton(onPressed: onOpenSuccess, child: const Text('预览成功页流程')),
           ],
         ),
       ),
@@ -144,11 +141,21 @@ class OrderDetailPage extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Status', style: Theme.of(context).textTheme.labelSmall?.copyWith(color: AppColors.primary)),
+                        Text(
+                          'Status',
+                          style: Theme.of(context).textTheme.labelSmall
+                              ?.copyWith(color: AppColors.primary),
+                        ),
                         const SizedBox(height: 4),
-                        Text('Seller shipped', style: Theme.of(context).textTheme.headlineSmall),
+                        Text(
+                          'Seller shipped',
+                          style: Theme.of(context).textTheme.headlineSmall,
+                        ),
                         const SizedBox(height: 6),
-                        Text('Expected delivery in 2-3 business days', style: Theme.of(context).textTheme.bodySmall),
+                        Text(
+                          'Expected delivery in 2-3 business days',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
                       ],
                     ),
                   ),
@@ -159,7 +166,11 @@ class OrderDetailPage extends StatelessWidget {
                       color: AppColors.accent,
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(Icons.local_shipping_rounded, color: AppColors.primary, size: 34),
+                    child: const Icon(
+                      Icons.local_shipping_rounded,
+                      color: AppColors.primary,
+                      size: 34,
+                    ),
                   ),
                 ],
               ),
@@ -170,7 +181,9 @@ class OrderDetailPage extends StatelessWidget {
               children: const [
                 _InfoLine(label: 'Alex Rivera', value: '+1 (555) 012-3456'),
                 SizedBox(height: 8),
-                Text('1282 Editorial Lane, Apt 4B\nNew York, NY 10001, United States'),
+                Text(
+                  '1282 Editorial Lane, Apt 4B\nNew York, NY 10001, United States',
+                ),
                 SizedBox(height: 14),
                 _LogisticsUpdate(),
               ],
@@ -182,7 +195,11 @@ class OrderDetailPage extends StatelessWidget {
                 color: AppColors.surface,
                 borderRadius: BorderRadius.circular(24),
                 boxShadow: const [
-                  BoxShadow(color: Color(0x10000000), blurRadius: 24, offset: Offset(0, 10)),
+                  BoxShadow(
+                    color: Color(0x10000000),
+                    blurRadius: 24,
+                    offset: Offset(0, 10),
+                  ),
                 ],
               ),
               child: Row(
@@ -219,8 +236,15 @@ class OrderDetailPage extends StatelessWidget {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text('245.00 credits', style: Theme.of(context).textTheme.headlineSmall?.copyWith(color: AppColors.text)),
-                            Text('Qty: 1', style: Theme.of(context).textTheme.bodySmall),
+                            Text(
+                              '245.00 credits',
+                              style: Theme.of(context).textTheme.headlineSmall
+                                  ?.copyWith(color: AppColors.text),
+                            ),
+                            Text(
+                              'Qty: 1',
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
                           ],
                         ),
                       ],
@@ -233,11 +257,22 @@ class OrderDetailPage extends StatelessWidget {
             const _BodyCard(
               title: 'Order information',
               children: [
-                _InfoLine(label: 'Order ID', value: 'TXN-8829-0012', copyIcon: true),
+                _InfoLine(
+                  label: 'Order ID',
+                  value: 'TXN-8829-0012',
+                  copyIcon: true,
+                ),
                 SizedBox(height: 12),
-                _InfoLine(label: 'Transaction time', value: 'Oct 22, 2023 11:32:09'),
+                _InfoLine(
+                  label: 'Transaction time',
+                  value: 'Oct 22, 2023 11:32:09',
+                ),
                 SizedBox(height: 12),
-                _InfoLine(label: 'Payment method', value: 'Editorial wallet (credit)', valueIcon: Icons.account_balance_wallet_rounded),
+                _InfoLine(
+                  label: 'Payment method',
+                  value: 'Editorial wallet (credit)',
+                  valueIcon: Icons.account_balance_wallet_rounded,
+                ),
               ],
             ),
             const SizedBox(height: 16),
@@ -248,11 +283,20 @@ class OrderDetailPage extends StatelessWidget {
                 SizedBox(height: 8),
                 _InfoLine(label: 'Shipping fee', value: '12.00'),
                 SizedBox(height: 8),
-                _InfoLine(label: 'Editorial discount', value: '-5.00', valueColor: AppColors.mint),
+                _InfoLine(
+                  label: 'Editorial discount',
+                  value: '-5.00',
+                  valueColor: AppColors.mint,
+                ),
                 SizedBox(height: 14),
                 Divider(color: AppColors.surfaceRaised),
                 SizedBox(height: 10),
-                _InfoLine(label: 'Total paid', value: '252.00', valueIcon: Icons.account_balance_wallet_rounded, emphasize: true),
+                _InfoLine(
+                  label: 'Total paid',
+                  value: '252.00',
+                  valueIcon: Icons.account_balance_wallet_rounded,
+                  emphasize: true,
+                ),
               ],
             ),
           ],
@@ -268,16 +312,35 @@ class OrderDetailPage extends StatelessWidget {
               color: Colors.white.withOpacity(0.92),
               borderRadius: BorderRadius.circular(28),
               boxShadow: const [
-                BoxShadow(color: Color(0x10000000), blurRadius: 24, offset: Offset(0, -2)),
+                BoxShadow(
+                  color: Color(0x10000000),
+                  blurRadius: 24,
+                  offset: Offset(0, -2),
+                ),
               ],
             ),
             child: Row(
               children: [
-                Expanded(child: OutlinedButton(onPressed: () {}, child: const Text('Contact seller'))),
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () {},
+                    child: const Text('联系卖家'),
+                  ),
+                ),
                 const SizedBox(width: 10),
-                Expanded(child: OutlinedButton(onPressed: () {}, child: const Text('View logistics'))),
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () {},
+                    child: const Text('查看物流'),
+                  ),
+                ),
                 const SizedBox(width: 10),
-                Expanded(child: FilledButton(onPressed: () {}, child: const Text('Confirm receipt'))),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: () {},
+                    child: const Text('确认收货'),
+                  ),
+                ),
               ],
             ),
           ),
@@ -321,7 +384,11 @@ class _ReviewPageState extends State<ReviewPage> {
                 color: AppColors.surface,
                 borderRadius: BorderRadius.circular(24),
                 boxShadow: const [
-                  BoxShadow(color: Color(0x10000000), blurRadius: 24, offset: Offset(0, 10)),
+                  BoxShadow(
+                    color: Color(0x10000000),
+                    blurRadius: 24,
+                    offset: Offset(0, 10),
+                  ),
                 ],
               ),
               child: Row(
@@ -344,9 +411,15 @@ class _ReviewPageState extends State<ReviewPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Vintage 1990s Camel Leather Carryall', style: Theme.of(context).textTheme.titleMedium),
+                        Text(
+                          'Vintage 1990s Camel Leather Carryall',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
                         const SizedBox(height: 6),
-                        Text('Ordered Oct 12, 2023', style: Theme.of(context).textTheme.bodySmall),
+                        Text(
+                          'Ordered Oct 12, 2023',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
                       ],
                     ),
                   ),
@@ -368,15 +441,22 @@ class _ReviewPageState extends State<ReviewPage> {
                         });
                       },
                       child: Icon(
-                        selected ? Icons.star_rounded : Icons.star_outline_rounded,
-                        color: selected ? AppColors.accentDeep : AppColors.textMuted.withOpacity(0.35),
+                        selected
+                            ? Icons.star_rounded
+                            : Icons.star_outline_rounded,
+                        color: selected
+                            ? AppColors.accentDeep
+                            : AppColors.textMuted.withOpacity(0.35),
                         size: 36,
                       ),
                     );
                   }),
                 ),
                 const SizedBox(height: 12),
-                Text('Tap a star to set the rating.', style: Theme.of(context).textTheme.bodySmall),
+                Text(
+                  'Tap a star to set the rating.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
               ],
             ),
             const SizedBox(height: 16),
@@ -387,7 +467,11 @@ class _ReviewPageState extends State<ReviewPage> {
                   spacing: 8,
                   runSpacing: 8,
                   children: [
-                    _ReviewTag(label: 'Great quality', selected: true, onTap: () {}),
+                    _ReviewTag(
+                      label: 'Great quality',
+                      selected: true,
+                      onTap: () {},
+                    ),
                     _ReviewTag(label: 'Careful packaging', onTap: () {}),
                     _ReviewTag(label: 'Fast delivery', onTap: () {}),
                     _ReviewTag(label: 'Friendly seller', onTap: () {}),
@@ -404,7 +488,8 @@ class _ReviewPageState extends State<ReviewPage> {
                 TextField(
                   maxLines: 6,
                   decoration: InputDecoration(
-                    hintText: 'Share your experience with the seller and item quality...',
+                    hintText:
+                        'Share your experience with the seller and item quality...',
                     filled: false,
                     fillColor: Colors.transparent,
                     contentPadding: EdgeInsets.zero,
@@ -433,10 +518,7 @@ class _ReviewPageState extends State<ReviewPage> {
               ],
             ),
             const SizedBox(height: 16),
-            FilledButton(
-              onPressed: () {},
-              child: const Text('Submit review'),
-            ),
+            FilledButton(onPressed: () {}, child: const Text('Submit review')),
           ],
         ),
       ),
@@ -470,7 +552,11 @@ class PaymentSuccessPage extends StatelessWidget {
                 color: AppColors.accent,
                 borderRadius: BorderRadius.circular(32),
                 boxShadow: const [
-                  BoxShadow(color: Color(0x24FFD83D), blurRadius: 28, offset: Offset(0, 14)),
+                  BoxShadow(
+                    color: Color(0x24FFD83D),
+                    blurRadius: 28,
+                    offset: Offset(0, 14),
+                  ),
                 ],
               ),
               child: Column(
@@ -482,12 +568,27 @@ class PaymentSuccessPage extends StatelessWidget {
                       color: Colors.white,
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(Icons.check_rounded, color: AppColors.primary, size: 50),
+                    child: const Icon(
+                      Icons.check_rounded,
+                      color: AppColors.primary,
+                      size: 50,
+                    ),
                   ),
                   const SizedBox(height: 18),
-                  Text('Payment successful', style: Theme.of(context).textTheme.headlineMedium?.copyWith(color: AppColors.primary)),
+                  Text(
+                    'Payment successful',
+                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                      color: AppColors.primary,
+                    ),
+                  ),
                   const SizedBox(height: 8),
-                  Text('Your order has been created and the seller has been notified.', textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.primary.withOpacity(0.84))),
+                  Text(
+                    'Your order has been created and the seller has been notified.',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: AppColors.primary.withOpacity(0.84),
+                    ),
+                  ),
                   const SizedBox(height: 16),
                   EditorialPill(
                     label: 'Order #TXN-8829-0012',
@@ -499,24 +600,29 @@ class PaymentSuccessPage extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             _BodyCard(
-              title: 'Receipt summary',
+              title: '收货摘要',
               children: const [
-                _InfoLine(label: 'Paid by', value: 'Editorial Wallet'),
+                _InfoLine(label: '支付方式', value: '平台钱包'),
                 SizedBox(height: 10),
-                _InfoLine(label: 'Amount', value: '¥252.00', valueIcon: Icons.account_balance_wallet_rounded, emphasize: true),
+                _InfoLine(
+                  label: '金额',
+                  value: '￥252.00',
+                  valueIcon: Icons.account_balance_wallet_rounded,
+                  emphasize: true,
+                ),
                 SizedBox(height: 10),
-                _InfoLine(label: 'Estimated delivery', value: '2-3 business days'),
+                _InfoLine(label: '预计送达', value: '2-3 个工作日'),
               ],
             ),
             const SizedBox(height: 16),
             _BodyCard(
-              title: 'Next steps',
+              title: '接下来',
               children: const [
-                _NextStep(label: 'Track shipping updates in the order detail page.'),
+                _NextStep(label: '在订单详情页查看物流状态。'),
                 SizedBox(height: 10),
-                _NextStep(label: 'Stay in touch with the seller through chat.'),
+                _NextStep(label: '通过聊天和卖家保持沟通。'),
                 SizedBox(height: 10),
-                _NextStep(label: 'Leave a review after the item arrives.'),
+                _NextStep(label: '收货后记得完成评价。'),
               ],
             ),
             const SizedBox(height: 16),
@@ -534,7 +640,11 @@ class PaymentSuccessPage extends StatelessWidget {
               color: Colors.white.withOpacity(0.92),
               borderRadius: BorderRadius.circular(28),
               boxShadow: const [
-                BoxShadow(color: Color(0x10000000), blurRadius: 24, offset: Offset(0, -2)),
+                BoxShadow(
+                  color: Color(0x10000000),
+                  blurRadius: 24,
+                  offset: Offset(0, -2),
+                ),
               ],
             ),
             child: LayoutBuilder(
@@ -544,11 +654,26 @@ class PaymentSuccessPage extends StatelessWidget {
                 if (!isCompact) {
                   return Row(
                     children: [
-                      Expanded(child: OutlinedButton(onPressed: () {}, child: const Text('Contact seller'))),
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () {},
+                          child: const Text('联系卖家'),
+                        ),
+                      ),
                       const SizedBox(width: 10),
-                      Expanded(child: OutlinedButton(onPressed: () {}, child: const Text('View logistics'))),
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () {},
+                          child: const Text('查看物流'),
+                        ),
+                      ),
                       const SizedBox(width: 10),
-                      Expanded(child: FilledButton(onPressed: () {}, child: const Text('Confirm receipt'))),
+                      Expanded(
+                        child: FilledButton(
+                          onPressed: () {},
+                          child: const Text('确认收货'),
+                        ),
+                      ),
                     ],
                   );
                 }
@@ -558,15 +683,28 @@ class PaymentSuccessPage extends StatelessWidget {
                   children: [
                     Row(
                       children: [
-                        Expanded(child: OutlinedButton(onPressed: () {}, child: const Text('Contact seller'))),
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () {},
+                            child: const Text('联系卖家'),
+                          ),
+                        ),
                         const SizedBox(width: 10),
-                        Expanded(child: OutlinedButton(onPressed: () {}, child: const Text('View logistics'))),
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () {},
+                            child: const Text('查看物流'),
+                          ),
+                        ),
                       ],
                     ),
                     const SizedBox(height: 10),
                     SizedBox(
                       width: double.infinity,
-                      child: FilledButton(onPressed: () {}, child: const Text('Confirm receipt')),
+                      child: FilledButton(
+                        onPressed: () {},
+                        child: const Text('确认收货'),
+                      ),
                     ),
                   ],
                 );
@@ -597,7 +735,11 @@ class _HeroPanel extends StatelessWidget {
         ),
         borderRadius: BorderRadius.circular(32),
         boxShadow: const [
-          BoxShadow(color: Color(0x18000000), blurRadius: 28, offset: Offset(0, 14)),
+          BoxShadow(
+            color: Color(0x18000000),
+            blurRadius: 28,
+            offset: Offset(0, 14),
+          ),
         ],
       ),
       child: Stack(
@@ -611,9 +753,9 @@ class _HeroPanel extends StatelessWidget {
               maxLines: 3,
               overflow: TextOverflow.ellipsis,
               style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                    color: AppColors.primary,
-                    height: 0.94,
-                  ),
+                color: AppColors.primary,
+                height: 0.94,
+              ),
             ),
           ),
           Positioned(
@@ -623,9 +765,9 @@ class _HeroPanel extends StatelessWidget {
             child: Text(
               subtitle,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: AppColors.primary.withOpacity(0.8),
-                    height: 1.45,
-                  ),
+                color: AppColors.primary.withOpacity(0.8),
+                height: 1.45,
+              ),
             ),
           ),
           Positioned(
@@ -692,7 +834,11 @@ class _PricePanel extends StatelessWidget {
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(24),
         boxShadow: const [
-          BoxShadow(color: Color(0x10000000), blurRadius: 24, offset: Offset(0, 10)),
+          BoxShadow(
+            color: Color(0x10000000),
+            blurRadius: 24,
+            offset: Offset(0, 10),
+          ),
         ],
       ),
       child: Column(
@@ -700,20 +846,22 @@ class _PricePanel extends StatelessWidget {
         children: [
           Row(
             children: [
-              Text(currentPrice, style: Theme.of(context).textTheme.displaySmall?.copyWith(color: AppColors.coral)),
+              Text(
+                currentPrice,
+                style: Theme.of(
+                  context,
+                ).textTheme.displaySmall?.copyWith(color: AppColors.coral),
+              ),
               const SizedBox(width: 12),
               Text(
                 oldPrice,
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: AppColors.textMuted,
-                      decoration: TextDecoration.lineThrough,
-                    ),
+                  color: AppColors.textMuted,
+                  decoration: TextDecoration.lineThrough,
+                ),
               ),
               const Spacer(),
-              EditorialPill(
-                label: discountLabel,
-                filled: true,
-              ),
+              EditorialPill(label: discountLabel, filled: true),
             ],
           ),
           const SizedBox(height: 10),
@@ -746,7 +894,11 @@ class _SellerPanel extends StatelessWidget {
               color: AppColors.surfaceRaised,
               borderRadius: BorderRadius.circular(22),
             ),
-            child: const Icon(Icons.person_rounded, color: AppColors.textMuted, size: 32),
+            child: const Icon(
+              Icons.person_rounded,
+              color: AppColors.textMuted,
+              size: 32,
+            ),
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -755,7 +907,10 @@ class _SellerPanel extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    Text('Julian Thorne', style: Theme.of(context).textTheme.titleMedium),
+                    Text(
+                      'Julian Thorne',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
                     const SizedBox(width: 8),
                     EditorialPill(
                       label: 'Trusted',
@@ -767,20 +922,39 @@ class _SellerPanel extends StatelessWidget {
                 const SizedBox(height: 6),
                 Row(
                   children: [
-                    const Icon(Icons.credit_score_rounded, size: 16, color: AppColors.textMuted),
+                    const Icon(
+                      Icons.credit_score_rounded,
+                      size: 16,
+                      color: AppColors.textMuted,
+                    ),
                     const SizedBox(width: 4),
-                    Text('Sesame 780', style: Theme.of(context).textTheme.bodySmall),
+                    Text(
+                      'Sesame 780',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
                     const SizedBox(width: 10),
-                    Container(width: 4, height: 4, decoration: const BoxDecoration(color: AppColors.border, shape: BoxShape.circle)),
+                    Container(
+                      width: 4,
+                      height: 4,
+                      decoration: const BoxDecoration(
+                        color: AppColors.border,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
                     const SizedBox(width: 10),
-                    Text('Active 2m ago', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.mint)),
+                    Text(
+                      'Active 2m ago',
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodySmall?.copyWith(color: AppColors.mint),
+                    ),
                   ],
                 ),
               ],
             ),
           ),
           const SizedBox(width: 10),
-          TextButton(onPressed: onOpenChat, child: const Text('Follow')),
+          TextButton(onPressed: onOpenChat, child: const Text('联系')),
         ],
       ),
     );
@@ -813,9 +987,17 @@ class _SpecGrid extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text(item.label.toUpperCase(), style: Theme.of(context).textTheme.labelSmall?.copyWith(color: AppColors.textMuted)),
+                  Text(
+                    item.label.toUpperCase(),
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: AppColors.textMuted,
+                    ),
+                  ),
                   const SizedBox(height: 6),
-                  Text(item.value, style: Theme.of(context).textTheme.titleMedium),
+                  Text(
+                    item.value,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
                 ],
               ),
             ),
@@ -846,7 +1028,11 @@ class _BodyCard extends StatelessWidget {
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(24),
         boxShadow: const [
-          BoxShadow(color: Color(0x10000000), blurRadius: 24, offset: Offset(0, 10)),
+          BoxShadow(
+            color: Color(0x10000000),
+            blurRadius: 24,
+            offset: Offset(0, 10),
+          ),
         ],
       ),
       child: Column(
@@ -892,13 +1078,24 @@ class _InquiryCard extends StatelessWidget {
                   children: [
                     Row(
                       children: [
-                        Text('Marcus L.', style: Theme.of(context).textTheme.labelLarge),
+                        Text(
+                          'Marcus L.',
+                          style: Theme.of(context).textTheme.labelLarge,
+                        ),
                         const Spacer(),
-                        Text('2h ago', style: Theme.of(context).textTheme.labelSmall),
+                        Text(
+                          '2h ago',
+                          style: Theme.of(context).textTheme.labelSmall,
+                        ),
                       ],
                     ),
                     const SizedBox(height: 6),
-                    Text('Has the light meter been recently calibrated? Is the battery door corroded?', style: Theme.of(context).textTheme.bodySmall?.copyWith(height: 1.4)),
+                    Text(
+                      'Has the light meter been recently calibrated? Is the battery door corroded?',
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodySmall?.copyWith(height: 1.4),
+                    ),
                   ],
                 ),
               ),
@@ -919,23 +1116,39 @@ class _InquiryCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 3,
+                  ),
                   decoration: BoxDecoration(
                     color: AppColors.accent,
                     borderRadius: BorderRadius.circular(6),
                   ),
-                  child: Text('SELLER', style: Theme.of(context).textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w800)),
+                  child: Text(
+                    'SELLER',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: Text('Light meter is perfect, recently checked against a Sekonic. No corrosion at all, very clean.', style: Theme.of(context).textTheme.bodySmall?.copyWith(height: 1.4)),
+                  child: Text(
+                    'Light meter is perfect, recently checked against a Sekonic. No corrosion at all, very clean.',
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodySmall?.copyWith(height: 1.4),
+                  ),
                 ),
               ],
             ),
           ),
         ),
         const SizedBox(height: 10),
-        TextButton(onPressed: onOpenReview, child: const Text('Preview review flow')),
+        TextButton(
+          onPressed: onOpenReview,
+          child: const Text('Preview review flow'),
+        ),
       ],
     );
   }
@@ -953,7 +1166,9 @@ class _ActionRow extends StatelessWidget {
         children.length,
         (index) => Expanded(
           child: Padding(
-            padding: EdgeInsets.only(right: index == children.length - 1 ? 0 : 10),
+            padding: EdgeInsets.only(
+              right: index == children.length - 1 ? 0 : 10,
+            ),
             child: children[index],
           ),
         ),
@@ -987,11 +1202,7 @@ class _ActionButton extends StatelessWidget {
       onPressed: onPressed,
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, size: 18),
-          const SizedBox(width: 8),
-          Text(label),
-        ],
+        children: [Icon(icon, size: 18), const SizedBox(width: 8), Text(label)],
       ),
     );
   }
@@ -1017,11 +1228,13 @@ class _InfoLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final valueStyle = emphasize
-        ? Theme.of(context).textTheme.headlineSmall?.copyWith(color: valueColor ?? AppColors.text)
+        ? Theme.of(context).textTheme.headlineSmall?.copyWith(
+            color: valueColor ?? AppColors.text,
+          )
         : Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: valueColor ?? AppColors.text,
-              fontWeight: FontWeight.w600,
-            );
+            color: valueColor ?? AppColors.text,
+            fontWeight: FontWeight.w600,
+          );
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
@@ -1032,19 +1245,23 @@ class _InfoLine extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               if (valueIcon != null) ...[
-                Icon(valueIcon, size: emphasize ? 22 : 18, color: valueColor ?? AppColors.primary),
+                Icon(
+                  valueIcon,
+                  size: emphasize ? 22 : 18,
+                  color: valueColor ?? AppColors.primary,
+                ),
                 const SizedBox(width: 6),
               ],
               Flexible(
-                child: Text(
-                  value,
-                  textAlign: TextAlign.end,
-                  style: valueStyle,
-                ),
+                child: Text(value, textAlign: TextAlign.end, style: valueStyle),
               ),
               if (copyIcon) ...[
                 const SizedBox(width: 6),
-                const Icon(Icons.content_copy_rounded, size: 16, color: AppColors.textMuted),
+                const Icon(
+                  Icons.content_copy_rounded,
+                  size: 16,
+                  color: AppColors.textMuted,
+                ),
               ],
             ],
           ),
@@ -1070,8 +1287,15 @@ class _LogisticsUpdate extends StatelessWidget {
           Container(
             width: 44,
             height: 44,
-            decoration: const BoxDecoration(color: AppColors.mint, shape: BoxShape.circle),
-            child: const Icon(Icons.inventory_2_rounded, color: Colors.white, size: 20),
+            decoration: const BoxDecoration(
+              color: AppColors.mint,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.inventory_2_rounded,
+              color: Colors.white,
+              size: 20,
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -1080,7 +1304,10 @@ class _LogisticsUpdate extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    Text('Logistics update', style: Theme.of(context).textTheme.titleSmall),
+                    Text(
+                      'Logistics update',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
                     const Spacer(),
                     EditorialPill(
                       label: 'Transit',
@@ -1090,9 +1317,15 @@ class _LogisticsUpdate extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 6),
-                Text('Arrived at regional distribution center', style: Theme.of(context).textTheme.bodySmall),
+                Text(
+                  'Arrived at regional distribution center',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
                 const SizedBox(height: 2),
-                Text('Oct 24, 2023 · 02:45 PM', style: Theme.of(context).textTheme.labelSmall),
+                Text(
+                  'Oct 24, 2023 · 02:45 PM',
+                  style: Theme.of(context).textTheme.labelSmall,
+                ),
               ],
             ),
           ),
@@ -1148,7 +1381,11 @@ class _PhotoRow extends StatelessWidget {
 }
 
 class _ReviewTag extends StatelessWidget {
-  const _ReviewTag({required this.label, required this.onTap, this.selected = false});
+  const _ReviewTag({
+    required this.label,
+    required this.onTap,
+    this.selected = false,
+  });
 
   final String label;
   final VoidCallback onTap;
@@ -1161,8 +1398,8 @@ class _ReviewTag extends StatelessWidget {
       selected: selected,
       onSelected: (_) => onTap(),
       labelStyle: Theme.of(context).textTheme.labelMedium?.copyWith(
-            color: selected ? AppColors.primary : AppColors.textMuted,
-          ),
+        color: selected ? AppColors.primary : AppColors.textMuted,
+      ),
     );
   }
 }
@@ -1184,7 +1421,11 @@ class _NextStep extends StatelessWidget {
             color: AppColors.accent,
             shape: BoxShape.circle,
           ),
-          child: const Icon(Icons.check_rounded, size: 14, color: AppColors.primary),
+          child: const Icon(
+            Icons.check_rounded,
+            size: 14,
+            color: AppColors.primary,
+          ),
         ),
         const SizedBox(width: 10),
         Expanded(

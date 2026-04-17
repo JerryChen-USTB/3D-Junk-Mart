@@ -1,6 +1,7 @@
 // ignore_for_file: use_null_aware_elements
 
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
@@ -190,6 +191,20 @@ class ReconstructionsRepository {
     return ReconstructionTask.fromJson(response.data, _apiRoot);
   }
 
+  Future<ReconstructionTask> uploadCover({
+    required String taskId,
+    required XFile image,
+    String? bearerToken,
+  }) async {
+    final response = await _apiClient.uploadFile(
+      '/reconstructions/$taskId/cover',
+      filePath: image.path,
+      fieldName: 'file',
+      bearerToken: bearerToken,
+    );
+    return ReconstructionTask.fromJson(response.data, _apiRoot);
+  }
+
   Future<ReconstructionTask> updatePublishFlowState({
     required String taskId,
     bool? viewerRotationDone,
@@ -250,5 +265,19 @@ class ReconstructionsRepository {
       message: response.reasonPhrase ?? 'request failed',
       rawBody: response.body,
     );
+  }
+
+  /// Download a remote file to [savePath].
+  Future<void> downloadFile(String url, String savePath) async {
+    final response = await _httpClient.get(Uri.parse(url));
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      await File(savePath).writeAsBytes(response.bodyBytes);
+    } else {
+      throw ApiException(
+        statusCode: response.statusCode,
+        message: 'Download failed: ${response.reasonPhrase}',
+        rawBody: '',
+      );
+    }
   }
 }

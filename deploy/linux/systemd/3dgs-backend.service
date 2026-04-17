@@ -1,0 +1,18 @@
+[Unit]
+Description=3DGS Marketplace Backend
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/3dgs-marketplace/repo
+EnvironmentFile=/etc/3dgs-marketplace/backend.env
+ExecStart=/opt/3dgs-marketplace/repo/backend/.venv/bin/python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+LogsDirectory=3dgs-marketplace
+ReadWritePaths=/data/3dgs-marketplace/backend /var/log/3dgs-marketplace
+
+[Install]
+WantedBy=multi-user.target

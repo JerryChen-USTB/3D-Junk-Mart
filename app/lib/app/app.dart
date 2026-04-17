@@ -105,7 +105,11 @@ class _JunkMartAppState extends State<JunkMartApp> {
     final token = _session?.accessToken;
     if (token != null && token.isNotEmpty) {
       try {
-        await _apiClient.postJson('/auth/logout', bearerToken: token);
+        await _apiClient.postJson(
+          '/auth/logout',
+          bearerToken: token,
+          body: const <String, dynamic>{},
+        );
       } catch (_) {
         // The client should still clear local state even if the backend is
         // already expired or unreachable.
