@@ -27,6 +27,7 @@ RECORD_TYPES = {
     "listing_favorite",
     "conversation",
     "conversation_member",
+    "conversation_offer",
     "message",
     "order",
     "order_item",
@@ -134,6 +135,7 @@ class MarketplaceStore:
         self._ensure_seed_assets()
         self._seed_platform_metadata()
         self._seed_if_needed()
+        self._repair_refunded_listing_status()
 
     def _make_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, check_same_thread=False)
@@ -197,6 +199,32 @@ class MarketplaceStore:
         # Disabled: production mode starts with an empty marketplace.
         # Users create their own listings via the 3D publish flow.
         pass
+
+    def _repair_refunded_listing_status(self) -> None:
+        """Recover listings left reserved by refund flows from older builds."""
+        orders = self.list_records("order")
+        orders_by_listing: dict[str, list[dict[str, Any]]] = {}
+        for order in orders:
+            listing_id = order["payload"].get("listing_id")
+            if listing_id:
+                orders_by_listing.setdefault(str(listing_id), []).append(order)
+
+        active_statuses = {"pending_payment", "awaiting_shipment", "shipped", "refund_requested", "disputed"}
+        for listing_id, listing_orders in orders_by_listing.items():
+            if not any(order["payload"].get("status") == "refunded" for order in listing_orders):
+                continue
+            if any(order["payload"].get("status") in active_statuses for order in listing_orders):
+                continue
+
+            listing = self.get_record("listing", listing_id)
+            if listing is None:
+                continue
+            payload = dict(listing["payload"])
+            if payload.get("status") in {"deleted", "sold", "live"}:
+                continue
+            payload["status"] = "live"
+            payload["updated_at"] = _utc_now()
+            self.upsert_record("listing", listing_id, payload, parent_id=listing.get("parent_id"))
 
     def close(self) -> None:
         conn = getattr(self._local, "conn", None)
@@ -1478,6 +1506,7 @@ class MarketplaceStore:
         record = {
             "id": address_id,
             "user_id": user_id,
+            "label": payload.get("label"),
             "recipient_name": payload.get("recipient_name") or "",
             "phone": payload.get("phone") or "",
             "region_code": payload.get("region_code") or "",
@@ -1499,7 +1528,7 @@ class MarketplaceStore:
         if address is None:
             raise KeyError(address_id)
         payload = dict(address["payload"])
-        for key in ("recipient_name", "phone", "region_code", "address_line1", "address_line2"):
+        for key in ("label", "recipient_name", "phone", "region_code", "address_line1", "address_line2"):
             if key in changes and changes[key] is not None:
                 payload[key] = changes[key]
         if "is_default" in changes and changes["is_default"] is not None:
@@ -1686,16 +1715,32 @@ class MarketplaceStore:
         body: str,
         entity_type: str | None = None,
         entity_id: str | None = None,
+        category: str | None = None,
+        icon_key: str | None = None,
+        cta_action: str | None = None,
+        cta_target: str | None = None,
     ) -> dict[str, Any]:
         notification_id = _generate_id("notification")
+        resolved_cta_target = cta_target
+        if not resolved_cta_target and entity_type and entity_id:
+            if entity_type == "order":
+                resolved_cta_target = f"/orders/{entity_id}"
+            elif entity_type == "conversation":
+                resolved_cta_target = f"/messages/{entity_id}"
+            elif entity_type == "listing":
+                resolved_cta_target = f"/listings/{entity_id}"
         payload = {
             "id": notification_id,
             "user_id": user_id,
             "notification_type": notification_type,
+            "category": category or notification_type,
+            "icon_key": icon_key or notification_type,
             "title": title,
             "body": body,
             "entity_type": entity_type,
             "entity_id": entity_id,
+            "cta_action": cta_action or ("open_detail" if resolved_cta_target else None),
+            "cta_target": resolved_cta_target,
             "read_at": None,
             "created_at": _utc_now(),
         }

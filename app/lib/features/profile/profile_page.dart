@@ -21,6 +21,7 @@ class ProfilePage extends StatefulWidget {
     required this.apiClient,
     required this.onOpenSettings,
     required this.onSignOut,
+    required this.onOpenFavorites,
     required this.onOpenOrders,
     required this.onOpenWallet,
     required this.onOpenMembership,
@@ -35,6 +36,7 @@ class ProfilePage extends StatefulWidget {
   final ApiClient apiClient;
   final VoidCallback onOpenSettings;
   final Future<void> Function() onSignOut;
+  final VoidCallback onOpenFavorites;
   final VoidCallback onOpenOrders;
   final VoidCallback onOpenWallet;
   final VoidCallback onOpenMembership;
@@ -50,8 +52,10 @@ class ProfilePage extends StatefulWidget {
 
 class _ProfilePageState extends State<ProfilePage> {
   Future<List<ListingSummary>>? _myListingsFuture;
+  Future<List<ListingSummary>>? _favoriteListingsFuture;
   Map<String, dynamic>? _userProfile;
-  final ListingPreviewController _previewController = ListingPreviewController();
+  final ListingPreviewController _previewController =
+      ListingPreviewController();
 
   @override
   void initState() {
@@ -69,6 +73,9 @@ class _ProfilePageState extends State<ProfilePage> {
   void _loadListings() {
     if (widget.repository != null) {
       _myListingsFuture = widget.repository!.fetchMyListings(
+        widget.session.accessToken,
+      );
+      _favoriteListingsFuture = widget.repository!.fetchFavoriteListings(
         widget.session.accessToken,
       );
     }
@@ -91,13 +98,18 @@ class _ProfilePageState extends State<ProfilePage> {
   Future<void> _refresh() async {
     final futures = <Future<void>>[_loadUserProfile()];
     if (widget.repository != null) {
-      final future = widget.repository!.fetchMyListings(
+      final listingsFuture = widget.repository!.fetchMyListings(
+        widget.session.accessToken,
+      );
+      final favoritesFuture = widget.repository!.fetchFavoriteListings(
         widget.session.accessToken,
       );
       setState(() {
-        _myListingsFuture = future;
+        _myListingsFuture = listingsFuture;
+        _favoriteListingsFuture = favoritesFuture;
       });
-      futures.add(future.then((_) {}));
+      futures.add(listingsFuture.then((_) {}));
+      futures.add(favoritesFuture.then((_) {}));
     }
     await Future.wait(futures);
   }
@@ -162,6 +174,9 @@ class _ProfilePageState extends State<ProfilePage> {
       );
       if (saved == true && mounted) {
         await _refresh();
+        if (!mounted) {
+          return;
+        }
         widget.onMarketplaceChanged?.call();
         ScaffoldMessenger.of(
           context,
@@ -171,9 +186,9 @@ class _ProfilePageState extends State<ProfilePage> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('加载商品信息失败：$error')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('加载商品信息失败：$error')));
     }
   }
 
@@ -211,6 +226,9 @@ class _ProfilePageState extends State<ProfilePage> {
         return;
       }
       await _refresh();
+      if (!mounted) {
+        return;
+      }
       widget.onMarketplaceChanged?.call();
       ScaffoldMessenger.of(
         context,
@@ -341,8 +359,7 @@ class _ProfilePageState extends State<ProfilePage> {
           width: 76,
           height: 76,
           fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) =>
-              _ProfileAvatarFallback(name: _displayName),
+          errorBuilder: (_, _, _) => _ProfileAvatarFallback(name: _displayName),
         ),
       );
     }
@@ -454,6 +471,43 @@ class _ProfilePageState extends State<ProfilePage> {
               ),
             ),
             const SizedBox(height: 16),
+            if (_myListingsFuture != null &&
+                _favoriteListingsFuture != null) ...[
+              FutureBuilder<List<ListingSummary>>(
+                future: _myListingsFuture,
+                builder: (context, listingsSnapshot) {
+                  return FutureBuilder<List<ListingSummary>>(
+                    future: _favoriteListingsFuture,
+                    builder: (context, favoritesSnapshot) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '我的交易',
+                            style: Theme.of(context).textTheme.headlineSmall,
+                          ),
+                          const SizedBox(height: 12),
+                          _BuyerActionPanel(
+                            listingCount:
+                                listingsSnapshot.data?.length.toString() ?? '0',
+                            favoriteCount:
+                                favoritesSnapshot.data?.length.toString() ??
+                                '0',
+                            onOpenFavorites: widget.onOpenFavorites,
+                            onOpenOrders: widget.onOpenOrders,
+                            onOpenWallet: widget.onOpenWallet,
+                            onOpenMembership: widget.onOpenMembership,
+                            onOpenNotifications: widget.onOpenNotifications,
+                            onOpenAddresses: widget.onOpenAddresses,
+                          ),
+                        ],
+                      );
+                    },
+                  );
+                },
+              ),
+              const SizedBox(height: 16),
+            ],
             if (_myListingsFuture != null) ...[
               FutureBuilder<List<ListingSummary>>(
                 future: _myListingsFuture,
@@ -507,7 +561,7 @@ class _ProfilePageState extends State<ProfilePage> {
                           child: ListView.separated(
                             scrollDirection: Axis.horizontal,
                             itemCount: listings.length,
-                            separatorBuilder: (_, __) =>
+                            separatorBuilder: (_, _) =>
                                 const SizedBox(width: 12),
                             itemBuilder: (context, index) {
                               final listing = listings[index];
@@ -520,8 +574,9 @@ class _ProfilePageState extends State<ProfilePage> {
                                         listing: listing,
                                         tall: false,
                                         previewController: _previewController,
-                                        onTap: () =>
-                                            widget.onOpenListing?.call(listing.id),
+                                        onTap: () => widget.onOpenListing?.call(
+                                          listing.id,
+                                        ),
                                       ),
                                     ),
                                     Positioned(
@@ -534,7 +589,8 @@ class _ProfilePageState extends State<ProfilePage> {
                                         shape: const CircleBorder(),
                                         child: InkWell(
                                           customBorder: const CircleBorder(),
-                                          onTap: () => _openListingActions(listing),
+                                          onTap: () =>
+                                              _openListingActions(listing),
                                           child: const Padding(
                                             padding: EdgeInsets.all(10),
                                             child: Icon(
@@ -558,28 +614,6 @@ class _ProfilePageState extends State<ProfilePage> {
               ),
               const SizedBox(height: 16),
             ],
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(24),
-              ),
-              child: Wrap(
-                spacing: 12,
-                runSpacing: 12,
-                children: [
-                  _QuickActionChip(label: '订单', onTap: widget.onOpenOrders),
-                  _QuickActionChip(label: '钱包', onTap: widget.onOpenWallet),
-                  _QuickActionChip(label: '会员', onTap: widget.onOpenMembership),
-                  _QuickActionChip(
-                    label: '通知',
-                    onTap: widget.onOpenNotifications,
-                  ),
-                  _QuickActionChip(label: '地址', onTap: widget.onOpenAddresses),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -679,6 +713,362 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 }
 
+class FavoriteListingsPage extends StatefulWidget {
+  const FavoriteListingsPage({
+    super.key,
+    required this.session,
+    required this.repository,
+    required this.onOpenListing,
+  });
+
+  final AppSession session;
+  final ListingsRepository repository;
+  final ValueChanged<String> onOpenListing;
+
+  @override
+  State<FavoriteListingsPage> createState() => _FavoriteListingsPageState();
+}
+
+class _FavoriteListingsPageState extends State<FavoriteListingsPage> {
+  late Future<List<ListingSummary>> _future;
+  final ListingPreviewController _previewController =
+      ListingPreviewController();
+
+  @override
+  void initState() {
+    super.initState();
+    _future = widget.repository.fetchFavoriteListings(
+      widget.session.accessToken,
+    );
+  }
+
+  @override
+  void dispose() {
+    _previewController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _refresh() async {
+    final future = widget.repository.fetchFavoriteListings(
+      widget.session.accessToken,
+    );
+    setState(() {
+      _future = future;
+    });
+    await future;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(title: const Text('我的收藏')),
+      body: RefreshIndicator(
+        onRefresh: _refresh,
+        child: FutureBuilder<List<ListingSummary>>(
+          future: _future,
+          builder: (context, snapshot) {
+            final listings = snapshot.data ?? const <ListingSummary>[];
+            if (snapshot.connectionState == ConnectionState.waiting &&
+                listings.isEmpty) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (listings.isEmpty) {
+              return ListView(
+                padding: const EdgeInsets.all(16),
+                children: const [
+                  _ProfileEmptyCard(
+                    icon: Icons.favorite_border_rounded,
+                    title: '还没有收藏商品',
+                    subtitle: '看到喜欢的商品可以先收藏，后续从这里快速找回。',
+                  ),
+                ],
+              );
+            }
+            return ListView(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+              children: [
+                Text(
+                  '共 ${listings.length} 件收藏',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 12),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final cardWidth = adaptiveGridCardWidth(
+                      constraints.maxWidth,
+                    );
+                    return Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
+                      children: [
+                        for (final listing in listings)
+                          SizedBox(
+                            width: cardWidth,
+                            child: ListingCard(
+                              listing: listing,
+                              tall: false,
+                              previewController: _previewController,
+                              onTap: () => widget.onOpenListing(listing.id),
+                            ),
+                          ),
+                      ],
+                    );
+                  },
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _BuyerActionPanel extends StatelessWidget {
+  const _BuyerActionPanel({
+    required this.listingCount,
+    required this.favoriteCount,
+    required this.onOpenFavorites,
+    required this.onOpenOrders,
+    required this.onOpenWallet,
+    required this.onOpenMembership,
+    required this.onOpenNotifications,
+    required this.onOpenAddresses,
+  });
+
+  final String listingCount;
+  final String favoriteCount;
+  final VoidCallback onOpenFavorites;
+  final VoidCallback onOpenOrders;
+  final VoidCallback onOpenWallet;
+  final VoidCallback onOpenMembership;
+  final VoidCallback onOpenNotifications;
+  final VoidCallback onOpenAddresses;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 18, 16, 18),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(28),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x10000000),
+            blurRadius: 24,
+            offset: Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: _ProfileCountShortcut(
+                  value: favoriteCount,
+                  label: '我的收藏',
+                  icon: Icons.favorite_rounded,
+                  color: AppColors.coral,
+                  onTap: onOpenFavorites,
+                ),
+              ),
+              Expanded(
+                child: _ProfileCountShortcut(
+                  value: listingCount,
+                  label: '我的商品',
+                  icon: Icons.storefront_rounded,
+                  color: AppColors.ocean,
+                  onTap: null,
+                ),
+              ),
+              Expanded(
+                child: _ProfileCountShortcut(
+                  value: '3D',
+                  label: '展示资产',
+                  icon: Icons.view_in_ar_rounded,
+                  color: AppColors.mint,
+                  onTap: null,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          const Divider(height: 1, color: AppColors.surfaceSoft),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: _ProfileIconAction(
+                  icon: Icons.receipt_long_rounded,
+                  label: '订单',
+                  onTap: onOpenOrders,
+                ),
+              ),
+              Expanded(
+                child: _ProfileIconAction(
+                  icon: Icons.account_balance_wallet_rounded,
+                  label: '钱包',
+                  onTap: onOpenWallet,
+                ),
+              ),
+              Expanded(
+                child: _ProfileIconAction(
+                  icon: Icons.workspace_premium_rounded,
+                  label: '会员',
+                  onTap: onOpenMembership,
+                ),
+              ),
+              Expanded(
+                child: _ProfileIconAction(
+                  icon: Icons.notifications_active_rounded,
+                  label: '通知',
+                  onTap: onOpenNotifications,
+                ),
+              ),
+              Expanded(
+                child: _ProfileIconAction(
+                  icon: Icons.location_on_rounded,
+                  label: '地址',
+                  onTap: onOpenAddresses,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProfileCountShortcut extends StatelessWidget {
+  const _ProfileCountShortcut({
+    required this.value,
+    required this.label,
+    required this.icon,
+    required this.color,
+    required this.onTap,
+  });
+
+  final String value;
+  final String label;
+  final IconData icon;
+  final Color color;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(18),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Column(
+          children: [
+            Container(
+              width: 46,
+              height: 46,
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Icon(icon, color: color, size: 24),
+            ),
+            const SizedBox(height: 8),
+            Text(value, style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 2),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: AppColors.textMuted),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ProfileIconAction extends StatelessWidget {
+  const _ProfileIconAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
+        child: Column(
+          children: [
+            Icon(icon, size: 24, color: AppColors.primary),
+            const SizedBox(height: 8),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(
+                context,
+              ).textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w800),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ProfileEmptyCard extends StatelessWidget {
+  const _ProfileEmptyCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(28),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(28),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, size: 42, color: AppColors.textMuted),
+          const SizedBox(height: 12),
+          Text(title, style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 6),
+          Text(
+            subtitle,
+            textAlign: TextAlign.center,
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: AppColors.textMuted),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ProfileAvatarFallback extends StatelessWidget {
   const _ProfileAvatarFallback({required this.name});
 
@@ -716,23 +1106,6 @@ class _ProfileMetric extends StatelessWidget {
         const SizedBox(height: 4),
         Text(label, style: Theme.of(context).textTheme.bodySmall),
       ],
-    );
-  }
-}
-
-class _QuickActionChip extends StatelessWidget {
-  const _QuickActionChip({required this.label, required this.onTap});
-
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return ActionChip(
-      label: Text(label),
-      onPressed: onTap,
-      backgroundColor: AppColors.surfaceSoft,
-      labelStyle: Theme.of(context).textTheme.labelMedium,
     );
   }
 }
@@ -939,7 +1312,7 @@ class _ListingEditorSheetState extends State<_ListingEditorSheet> {
             fit: BoxFit.cover,
             width: double.infinity,
             height: 180,
-            errorBuilder: (_, __, ___) => const _EditorCoverPlaceholder(),
+            errorBuilder: (_, _, _) => const _EditorCoverPlaceholder(),
           )
         : const _EditorCoverPlaceholder();
 
@@ -973,22 +1346,23 @@ class _ListingEditorSheetState extends State<_ListingEditorSheet> {
               const SizedBox(height: 16),
               Text('编辑商品', style: Theme.of(context).textTheme.headlineSmall),
               const SizedBox(height: 12),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(20),
-                child: cover,
-              ),
+              ClipRRect(borderRadius: BorderRadius.circular(20), child: cover),
               const SizedBox(height: 12),
               Wrap(
                 spacing: 12,
                 runSpacing: 12,
                 children: [
                   OutlinedButton.icon(
-                    onPressed: _saving ? null : () => _pickCover(ImageSource.camera),
+                    onPressed: _saving
+                        ? null
+                        : () => _pickCover(ImageSource.camera),
                     icon: const Icon(Icons.photo_camera_rounded),
                     label: const Text('拍摄封面'),
                   ),
                   OutlinedButton.icon(
-                    onPressed: _saving ? null : () => _pickCover(ImageSource.gallery),
+                    onPressed: _saving
+                        ? null
+                        : () => _pickCover(ImageSource.gallery),
                     icon: const Icon(Icons.photo_library_rounded),
                     label: const Text('更换封面'),
                   ),
@@ -1008,7 +1382,9 @@ class _ListingEditorSheetState extends State<_ListingEditorSheet> {
               const SizedBox(height: 12),
               TextField(
                 controller: _priceController,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
                 decoration: const InputDecoration(labelText: '价格'),
               ),
               const SizedBox(height: 12),
@@ -1030,7 +1406,9 @@ class _ListingEditorSheetState extends State<_ListingEditorSheet> {
                 children: [
                   Expanded(
                     child: OutlinedButton(
-                      onPressed: _saving ? null : () => Navigator.of(context).pop(false),
+                      onPressed: _saving
+                          ? null
+                          : () => Navigator.of(context).pop(false),
                       child: const Text('取消'),
                     ),
                   ),

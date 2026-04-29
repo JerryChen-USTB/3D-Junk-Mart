@@ -175,7 +175,7 @@ ThemeData buildAppTheme() {
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         elevation: 0,
-        minimumSize: const Size.fromHeight(54),
+        minimumSize: const Size(0, 46),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         textStyle: textTheme.labelLarge?.copyWith(
           color: Colors.white,
@@ -188,7 +188,7 @@ ThemeData buildAppTheme() {
         backgroundColor: AppColors.accent,
         foregroundColor: AppColors.primary,
         elevation: 0,
-        minimumSize: const Size.fromHeight(54),
+        minimumSize: const Size(0, 46),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         textStyle: textTheme.labelLarge?.copyWith(
           color: AppColors.primary,
@@ -200,7 +200,7 @@ ThemeData buildAppTheme() {
       style: OutlinedButton.styleFrom(
         foregroundColor: AppColors.text,
         side: const BorderSide(color: AppColors.border),
-        minimumSize: const Size.fromHeight(54),
+        minimumSize: const Size(0, 46),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         textStyle: textTheme.labelLarge?.copyWith(
           color: AppColors.text,

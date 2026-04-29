@@ -77,7 +77,19 @@ def _create_paid_order(harness, fixture: dict[str, str]) -> str:
     if payload.get("code") != 0:
         raise AssertionError(payload)
     data = payload["data"]
-    return str(data["order"]["id"])
+    order_id = str(data["order"]["id"])
+
+    pay_response = harness.client.post(
+        f"/api/v1/orders/{order_id}/mock-pay",
+        headers=_auth_headers(fixture["buyer_token"]),
+        json={},
+    )
+    if pay_response.status_code != 200:
+        raise AssertionError(pay_response.text)
+    pay_payload = pay_response.json()
+    if pay_payload.get("code") != 0:
+        raise AssertionError(pay_payload)
+    return order_id
 
 
 def _prepare_ready_task(harness, *, task_id: str, seller_id: str) -> None:
@@ -285,6 +297,28 @@ class BackendMatrixTestCase(unittest.TestCase):
             listing_record = harness.store.get_record("listing", fixture["listing_id"])
             self.assertEqual(listing_record["payload"]["status"], "reserved")
 
+            _assert_error(
+                self,
+                harness.client.post(
+                    f"/api/v1/orders/{order_id}/cancel",
+                    headers=_auth_headers(fixture["seller_token"]),
+                    json={},
+                ),
+                expected_status=403,
+                expected_code=1002,
+            )
+
+            _assert_error(
+                self,
+                harness.client.post(
+                    f"/api/v1/_legacy/orders/{order_id}/cancel",
+                    headers=_auth_headers(fixture["seller_token"]),
+                    json={},
+                ),
+                expected_status=403,
+                expected_code=1002,
+            )
+
             cancelled, _ = _assert_ok(
                 self,
                 harness.client.post(
@@ -307,10 +341,210 @@ class BackendMatrixTestCase(unittest.TestCase):
             )
             self.assertEqual(order_detail["order"]["status"], "cancelled")
 
+    def test_offer_acceptance_can_drive_order_pricing(self) -> None:
+        with backend_harness("offer_to_order") as harness:
+            fixture = _create_marketplace_fixture(harness)
+
+            conversation_detail, _ = _assert_ok(
+                self,
+                harness.client.post(
+                    "/api/v1/conversations",
+                    headers=_auth_headers(fixture["buyer_token"]),
+                    json={"listing_id": fixture["listing_id"]},
+                ),
+            )
+            conversation_id = str(conversation_detail["conversation"]["id"])
+
+            offer_payload, _ = _assert_ok(
+                self,
+                harness.client.post(
+                    f"/api/v1/conversations/{conversation_id}/offers",
+                    headers=_auth_headers(fixture["buyer_token"]),
+                    json={
+                        "amount_minor": 18800,
+                        "currency": "CNY",
+                        "note": "Could you do 188?",
+                    },
+                ),
+            )
+            offer_id = str(offer_payload["offer"]["id"])
+
+            accepted, _ = _assert_ok(
+                self,
+                harness.client.post(
+                    f"/api/v1/conversations/{conversation_id}/offers/{offer_id}/accept",
+                    headers=_auth_headers(fixture["seller_token"]),
+                    json={},
+                ),
+            )
+            self.assertEqual(accepted["offer"]["status"], "accepted")
+
+            _assert_error(
+                self,
+                harness.client.post(
+                    "/api/v1/orders",
+                    headers=_auth_headers(fixture["buyer_token"]),
+                    json={
+                        "listing_id": fixture["listing_id"],
+                        "address_id": fixture["address_id"],
+                        "conversation_id": "conversation_missing",
+                        "offer_id": offer_id,
+                    },
+                ),
+                expected_status=404,
+                expected_code=3004,
+            )
+
+            order_payload, _ = _assert_ok(
+                self,
+                harness.client.post(
+                    "/api/v1/orders",
+                    headers=_auth_headers(fixture["buyer_token"]),
+                    json={
+                        "listing_id": fixture["listing_id"],
+                        "address_id": fixture["address_id"],
+                        "conversation_id": conversation_id,
+                        "offer_id": offer_id,
+                    },
+                ),
+            )
+            self.assertEqual(order_payload["order"]["status"], "pending_payment")
+            self.assertEqual(
+                order_payload["order"]["totals"]["subtotal"]["amount_minor"],
+                18800,
+            )
+            self.assertEqual(order_payload["order"]["conversation_id"], conversation_id)
+            order_id = str(order_payload["order"]["id"])
+
+            _assert_error(
+                self,
+                harness.client.post(
+                    f"/api/v1/conversations/{conversation_id}/offers",
+                    headers=_auth_headers(fixture["buyer_token"]),
+                    json={
+                        "amount_minor": 18000,
+                        "currency": "CNY",
+                        "note": "Try another offer after checkout.",
+                    },
+                ),
+                expected_status=409,
+                expected_code=3002,
+            )
+
+            cancelled, _ = _assert_ok(
+                self,
+                harness.client.post(
+                    f"/api/v1/orders/{order_id}/cancel",
+                    headers=_auth_headers(fixture["buyer_token"]),
+                    json={},
+                ),
+            )
+            self.assertEqual(cancelled["order"]["status"], "cancelled")
+
+            _assert_error(
+                self,
+                harness.client.post(
+                    "/api/v1/orders",
+                    headers=_auth_headers(fixture["buyer_token"]),
+                    json={
+                        "listing_id": fixture["listing_id"],
+                        "address_id": fixture["address_id"],
+                        "conversation_id": conversation_id,
+                        "offer_id": offer_id,
+                    },
+                ),
+                expected_status=409,
+                expected_code=3002,
+            )
+
+    def test_refund_request_and_approval_restore_listing(self) -> None:
+        with backend_harness("refund_approval") as harness:
+            fixture = _create_marketplace_fixture(harness)
+            order_id = _create_paid_order(harness, fixture)
+
+            buyer_detail, _ = _assert_ok(
+                self,
+                harness.client.get(
+                    f"/api/v1/orders/{order_id}",
+                    headers=_auth_headers(fixture["buyer_token"]),
+                ),
+            )
+            buyer_actions = {item["key"] for item in buyer_detail["action_bar"]}
+            self.assertIn("request_refund", buyer_actions)
+            self.assertNotIn("cancel_order", buyer_actions)
+
+            seller_detail, _ = _assert_ok(
+                self,
+                harness.client.get(
+                    f"/api/v1/orders/{order_id}",
+                    headers=_auth_headers(fixture["seller_token"]),
+                ),
+            )
+            seller_actions = {item["key"] for item in seller_detail["action_bar"]}
+            self.assertIn("ship_order", seller_actions)
+            self.assertNotIn("approve_refund", seller_actions)
+
+            _assert_error(
+                self,
+                harness.client.post(
+                    f"/api/v1/orders/{order_id}/dispute",
+                    headers=_auth_headers(fixture["buyer_token"]),
+                    json={"reason": "Need seller response."},
+                ),
+                expected_status=409,
+                expected_code=3002,
+            )
+
+            refund_requested, _ = _assert_ok(
+                self,
+                harness.client.post(
+                    f"/api/v1/orders/{order_id}/refund-request",
+                    headers=_auth_headers(fixture["buyer_token"]),
+                    json={"reason": "Buyer changed mind."},
+                ),
+            )
+            self.assertEqual(refund_requested["order"]["status"], "refund_requested")
+            seller_refund_detail, _ = _assert_ok(
+                self,
+                harness.client.get(
+                    f"/api/v1/orders/{order_id}",
+                    headers=_auth_headers(fixture["seller_token"]),
+                ),
+            )
+            refund_actions = {
+                item["key"] for item in seller_refund_detail["action_bar"]
+            }
+            self.assertIn("approve_refund", refund_actions)
+            self.assertIn("reject_refund", refund_actions)
+
+            refunded, _ = _assert_ok(
+                self,
+                harness.client.post(
+                    f"/api/v1/orders/{order_id}/approve-refund",
+                    headers=_auth_headers(fixture["seller_token"]),
+                    json={"resolution_note": "Approved by seller."},
+                ),
+            )
+            self.assertEqual(refunded["order"]["status"], "refunded")
+
+            listing_record = harness.store.get_record("listing", fixture["listing_id"])
+            self.assertEqual(listing_record["payload"]["status"], "live")
+
     def test_order_dispute_flow(self) -> None:
         with backend_harness("order_dispute") as harness:
             fixture = _create_marketplace_fixture(harness)
             order_id = _create_paid_order(harness, fixture)
+
+            _assert_error(
+                self,
+                harness.client.post(
+                    f"/api/v1/orders/{order_id}/ship",
+                    headers=_auth_headers(fixture["seller_token"]),
+                    json={"carrier_name": "SF", "tracking_no": "   "},
+                ),
+                expected_status=400,
+                expected_code=3001,
+            )
 
             _assert_ok(
                 self,
@@ -339,6 +573,93 @@ class BackendMatrixTestCase(unittest.TestCase):
                 ),
             )
             self.assertEqual(receipt["shipment"]["status"], "shipped")
+
+    def test_shipped_order_can_request_refund(self) -> None:
+        with backend_harness("shipped_refund") as harness:
+            fixture = _create_marketplace_fixture(harness)
+            order_id = _create_paid_order(harness, fixture)
+
+            _assert_ok(
+                self,
+                harness.client.post(
+                    f"/api/v1/orders/{order_id}/ship",
+                    headers=_auth_headers(fixture["seller_token"]),
+                    json={"carrier_name": "SF", "tracking_no": "SF123456"},
+                ),
+            )
+
+            buyer_detail, _ = _assert_ok(
+                self,
+                harness.client.get(
+                    f"/api/v1/orders/{order_id}",
+                    headers=_auth_headers(fixture["buyer_token"]),
+                ),
+            )
+            buyer_actions = {item["key"] for item in buyer_detail["action_bar"]}
+            self.assertIn("request_refund", buyer_actions)
+            self.assertIn("confirm_receipt", buyer_actions)
+
+            refund_requested, _ = _assert_ok(
+                self,
+                harness.client.post(
+                    f"/api/v1/orders/{order_id}/refund-request",
+                    headers=_auth_headers(fixture["buyer_token"]),
+                    json={"reason": "Package arrived damaged."},
+                ),
+            )
+            self.assertEqual(refund_requested["order"]["status"], "refund_requested")
+            self.assertFalse(refund_requested["order"]["can_confirm_receipt"])
+            self.assertEqual(refund_requested["order"]["shipping_status"], "shipped")
+
+            refunded, _ = _assert_ok(
+                self,
+                harness.client.post(
+                    f"/api/v1/orders/{order_id}/approve-refund",
+                    headers=_auth_headers(fixture["seller_token"]),
+                    json={"resolution_note": "Approved after shipment."},
+                ),
+            )
+            self.assertEqual(refunded["order"]["status"], "refunded")
+            listing_record = harness.store.get_record("listing", fixture["listing_id"])
+            self.assertEqual(listing_record["payload"]["status"], "live")
+
+    def test_refunded_reserved_listing_is_repaired_to_live(self) -> None:
+        with backend_harness("refund_repair") as harness:
+            fixture = _create_marketplace_fixture(harness)
+            order_id = _create_paid_order(harness, fixture)
+
+            _assert_ok(
+                self,
+                harness.client.post(
+                    f"/api/v1/orders/{order_id}/refund-request",
+                    headers=_auth_headers(fixture["buyer_token"]),
+                    json={"reason": "Changed my mind."},
+                ),
+            )
+            _assert_ok(
+                self,
+                harness.client.post(
+                    f"/api/v1/orders/{order_id}/approve-refund",
+                    headers=_auth_headers(fixture["seller_token"]),
+                    json={"resolution_note": "Approved."},
+                ),
+            )
+
+            listing_record = harness.store.get_record("listing", fixture["listing_id"])
+            self.assertIsNotNone(listing_record)
+            stale_payload = dict(listing_record["payload"])
+            stale_payload["status"] = "reserved"
+            harness.store.upsert_record(
+                "listing",
+                fixture["listing_id"],
+                stale_payload,
+                parent_id=listing_record.get("parent_id"),
+            )
+
+            harness.store._repair_refunded_listing_status()
+
+            repaired_listing = harness.store.get_record("listing", fixture["listing_id"])
+            self.assertEqual(repaired_listing["payload"]["status"], "live")
 
     def test_order_completion_review_wallet_membership_and_notifications(self) -> None:
         with backend_harness("order_complete") as harness:
@@ -375,6 +696,16 @@ class BackendMatrixTestCase(unittest.TestCase):
                 expected_status=409,
                 expected_code=3002,
             )
+
+            paid_order, _ = _assert_ok(
+                self,
+                harness.client.post(
+                    f"/api/v1/orders/{order_id}/mock-pay",
+                    headers=_auth_headers(fixture["buyer_token"]),
+                    json={},
+                ),
+            )
+            self.assertEqual(paid_order["order"]["status"], "awaiting_shipment")
 
             _assert_ok(
                 self,

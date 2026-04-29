@@ -3,6 +3,7 @@ import 'dart:math' as math;
 class ListingSummary {
   const ListingSummary({
     required this.id,
+    required this.categoryId,
     required this.title,
     required this.subtitle,
     required this.priceLabel,
@@ -16,10 +17,21 @@ class ListingSummary {
     required this.sellerName,
     required this.sellerAvatarUrl,
     required this.status,
+    required this.conditionLevel,
+    required this.conditionLabel,
+    required this.shippingFeeMinor,
+    required this.shippingFeeLabel,
+    required this.shippingPromise,
+    required this.isNegotiable,
+    required this.isFavorited,
+    required this.favoriteCount,
+    required this.has3dPreview,
+    required this.sellerTrust,
     this.viewerUrl,
   });
 
   final String id;
+  final String categoryId;
   final String title;
   final String subtitle;
   final String priceLabel;
@@ -33,10 +45,25 @@ class ListingSummary {
   final String sellerName;
   final String? sellerAvatarUrl;
   final String status;
+  final String conditionLevel;
+  final String conditionLabel;
+  final int shippingFeeMinor;
+  final String shippingFeeLabel;
+  final String shippingPromise;
+  final bool isNegotiable;
+  final bool isFavorited;
+  final int favoriteCount;
+  final bool has3dPreview;
+  final ListingSellerTrust sellerTrust;
   final String? viewerUrl;
 
   bool get has3dBadge =>
+      has3dPreview ||
       badges.any((badge) => badge.toLowerCase().contains('3d'));
+
+  bool get isLive => status == 'live';
+
+  bool get hasKnownCondition => conditionLabel != _unknownConditionLabel;
 
   factory ListingSummary.fromJson(Map<String, dynamic> json, Uri apiRoot) {
     final coverMedia =
@@ -48,7 +75,8 @@ class ListingSummary {
 
     return ListingSummary(
       id: json['id']?.toString() ?? '',
-      title: json['title']?.toString() ?? '未命名商品',
+      categoryId: json['category_id']?.toString() ?? '',
+      title: json['title']?.toString() ?? 'Untitled listing',
       subtitle: json['subtitle']?.toString() ?? '',
       priceLabel: formatMoney(json['price']),
       priceMinor: _moneyAmountMinor(json['price']),
@@ -60,7 +88,7 @@ class ListingSummary {
             json['location_city'],
             seller['location'],
           ]) ??
-          '未知地区',
+          'Unknown location',
       badges: _readStringList(json['badges']),
       coverImageUrl: _resolveUrl(
         coverMedia['thumbnail_url']?.toString() ??
@@ -68,10 +96,52 @@ class ListingSummary {
         apiRoot,
       ),
       sellerId: seller['id']?.toString() ?? '',
-      sellerName: seller['display_name']?.toString() ?? '卖家',
+      sellerName: seller['display_name']?.toString() ?? 'Seller',
       sellerAvatarUrl: _resolveUrl(seller['avatar_url']?.toString(), apiRoot),
       status: json['status']?.toString() ?? 'unknown',
+      conditionLevel: json['condition_level']?.toString() ?? '',
+      conditionLabel: _normalizeConditionLabel(
+        level: json['condition_level']?.toString(),
+        label: json['condition_label']?.toString(),
+      ),
+      shippingFeeMinor: _moneyAmountMinor(json['shipping_fee']),
+      shippingFeeLabel: formatMoney(json['shipping_fee']),
+      shippingPromise: json['shipping_promise']?.toString() ?? '',
+      isNegotiable: json['is_negotiable'] == true,
+      isFavorited: json['is_favorited'] == true,
+      favoriteCount: (json['favorite_count'] as num?)?.toInt() ?? 0,
+      has3dPreview: json['has_3d_preview'] == true,
+      sellerTrust: ListingSellerTrust.fromJson(
+        (json['seller_trust'] as Map?)?.cast<String, dynamic>() ??
+            const <String, dynamic>{},
+      ),
       viewerUrl: _resolveUrl(json['viewer_url']?.toString(), apiRoot),
+    );
+  }
+}
+
+class ListingSellerTrust {
+  const ListingSellerTrust({
+    required this.soldCount,
+    required this.followersCount,
+    required this.positiveRate,
+    required this.sesameScore,
+    required this.vipLevel,
+  });
+
+  final int soldCount;
+  final int followersCount;
+  final double? positiveRate;
+  final int sesameScore;
+  final String vipLevel;
+
+  factory ListingSellerTrust.fromJson(Map<String, dynamic> json) {
+    return ListingSellerTrust(
+      soldCount: (json['sold_count'] as num?)?.toInt() ?? 0,
+      followersCount: (json['followers_count'] as num?)?.toInt() ?? 0,
+      positiveRate: (json['positive_rate'] as num?)?.toDouble(),
+      sesameScore: (json['sesame_credit_score'] as num?)?.toInt() ?? 0,
+      vipLevel: json['vip_level']?.toString() ?? 'none',
     );
   }
 }
@@ -86,6 +156,8 @@ class ListingDetail {
     required this.preview3d,
     required this.specs,
     required this.actions,
+    required this.servicePromises,
+    required this.transactionInfo,
   });
 
   final ListingSummary summary;
@@ -96,6 +168,8 @@ class ListingDetail {
   final ListingPreview3d preview3d;
   final List<ListingSpec> specs;
   final List<ListingAction> actions;
+  final List<String> servicePromises;
+  final ListingTransactionInfo transactionInfo;
 
   factory ListingDetail.fromJson(Map<String, dynamic> json, Uri apiRoot) {
     final resources =
@@ -117,15 +191,15 @@ class ListingDetail {
       description:
           payload['description']?.toString() ??
           listing['subtitle']?.toString() ??
-          '暂无商品描述。',
-      sellerBio: seller['bio']?.toString() ?? '卖家暂未填写简介。',
+          'No description yet.',
+      sellerBio: seller['bio']?.toString() ?? 'This seller has not added a bio.',
       sellerLocation:
           _firstNonEmptyString(<Object?>[
             seller['location'],
             listing['location'],
             listing['location_city'],
           ]) ??
-          '未知地区',
+          'Unknown location',
       sellerScore: (seller['sesame_credit_score'] as num?)?.toInt(),
       preview3d: ListingPreview3d.fromJson(
         (resources['preview_3d'] as Map?)?.cast<String, dynamic>() ??
@@ -140,6 +214,49 @@ class ListingDetail {
           .whereType<Map>()
           .map((item) => ListingAction.fromJson(item.cast<String, dynamic>()))
           .toList(growable: false),
+      servicePromises: _readStringList(resources['service_promises']),
+      transactionInfo: ListingTransactionInfo.fromJson(
+        (resources['transaction_info'] as Map?)?.cast<String, dynamic>() ??
+            const <String, dynamic>{},
+      ),
+    );
+  }
+}
+
+class ListingTransactionInfo {
+  const ListingTransactionInfo({
+    required this.conditionLevel,
+    required this.conditionLabel,
+    required this.defectNotes,
+    required this.shippingFeeMinor,
+    required this.shippingFeeLabel,
+    required this.shippingPromise,
+    required this.isNegotiable,
+    required this.favoriteCount,
+  });
+
+  final String conditionLevel;
+  final String conditionLabel;
+  final String defectNotes;
+  final int shippingFeeMinor;
+  final String shippingFeeLabel;
+  final String shippingPromise;
+  final bool isNegotiable;
+  final int favoriteCount;
+
+  factory ListingTransactionInfo.fromJson(Map<String, dynamic> json) {
+    return ListingTransactionInfo(
+      conditionLevel: json['condition_level']?.toString() ?? '',
+      conditionLabel: _normalizeConditionLabel(
+        level: json['condition_level']?.toString(),
+        label: json['condition_label']?.toString(),
+      ),
+      defectNotes: json['defect_notes']?.toString() ?? '',
+      shippingFeeMinor: _moneyAmountMinor(json['shipping_fee']),
+      shippingFeeLabel: formatMoney(json['shipping_fee']),
+      shippingPromise: json['shipping_promise']?.toString() ?? '',
+      isNegotiable: json['is_negotiable'] == true,
+      favoriteCount: (json['favorite_count'] as num?)?.toInt() ?? 0,
     );
   }
 }
@@ -210,8 +327,10 @@ class ListingPreview3d {
             coverMedia['url']?.toString(),
         apiRoot,
       ),
-      placeholderTitle: placeholder['title']?.toString() ?? '3D 商品预览',
-      placeholderSubtitle: placeholder['subtitle']?.toString() ?? '3D 模型暂未就绪。',
+      placeholderTitle:
+          placeholder['title']?.toString() ?? '3D product preview',
+      placeholderSubtitle:
+          placeholder['subtitle']?.toString() ?? 'The 3D model is not ready yet.',
       placeholderBadges: _readStringList(placeholder['badges']),
     );
   }
@@ -225,7 +344,7 @@ class ListingSpec {
 
   factory ListingSpec.fromJson(Map<String, dynamic> json) {
     return ListingSpec(
-      label: json['spec_key']?.toString() ?? '参数',
+      label: json['spec_key']?.toString() ?? 'Spec',
       value: json['spec_value']?.toString() ?? '-',
     );
   }
@@ -236,17 +355,20 @@ class ListingAction {
     required this.key,
     required this.title,
     required this.enabled,
+    this.active = false,
   });
 
   final String key;
   final String title;
   final bool enabled;
+  final bool active;
 
   factory ListingAction.fromJson(Map<String, dynamic> json) {
     return ListingAction(
       key: json['key']?.toString() ?? '',
       title: json['title']?.toString() ?? '',
       enabled: json['enabled'] != false,
+      active: json['active'] == true,
     );
   }
 }
@@ -275,20 +397,62 @@ List<String> _readStringList(Object? raw) {
   return raw.map((item) => item.toString()).toList(growable: false);
 }
 
+const String _unknownConditionLabel = '成色待补充';
+
+const Map<String, String> _conditionLabels = <String, String>{
+  'new': '全新',
+  'excellent': '近乎全新',
+  'good': '成色良好',
+  'fair': '正常使用',
+  'poor': '瑕疵明显',
+};
+
+String _normalizeConditionLabel({
+  required String? level,
+  required String? label,
+}) {
+  final normalizedLevel = level?.trim().toLowerCase() ?? '';
+  if (_conditionLabels.containsKey(normalizedLevel)) {
+    return _conditionLabels[normalizedLevel]!;
+  }
+
+  final normalizedLabel = label?.trim() ?? '';
+  if (normalizedLabel.isEmpty || _isUnknownConditionLabel(normalizedLabel)) {
+    return _unknownConditionLabel;
+  }
+
+  final loweredLabel = normalizedLabel.toLowerCase();
+  if (_conditionLabels.containsKey(loweredLabel)) {
+    return _conditionLabels[loweredLabel]!;
+  }
+
+  return normalizedLabel;
+}
+
+bool _isUnknownConditionLabel(String label) {
+  final lowered = label.trim().toLowerCase();
+  return lowered.isEmpty ||
+      lowered == 'unknown' ||
+      lowered == 'condition unknown' ||
+      lowered == 'n/a' ||
+      lowered == 'null' ||
+      lowered == 'none';
+}
+
 String formatMoney(Object? rawPrice) {
   if (rawPrice is! Map) {
-    return '面议';
+    return 'Negotiable';
   }
 
   final price = rawPrice.cast<String, dynamic>();
   final currency = price['currency']?.toString() ?? '';
   final amountMinor = (price['amount_minor'] as num?)?.toInt();
   if (amountMinor == null) {
-    return '面议';
+    return 'Negotiable';
   }
 
   final symbol = switch (currency.toUpperCase()) {
-    'CNY' => '￥',
+    'CNY' => '¥',
     'USD' => '\$',
     'EUR' => '€',
     _ => '${currency.toUpperCase()} ',

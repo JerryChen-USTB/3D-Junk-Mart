@@ -4,7 +4,7 @@ import '../../core/listings/listing_models.dart';
 import '../../core/listings/listings_repository.dart';
 import '../../core/session/app_session.dart';
 import '../../theme/app_colors.dart';
-import '../../widgets/editorial_widgets.dart';
+import '../../widgets/commerce_widgets.dart';
 import '../viewer/viewer_page.dart';
 
 class ListingDetailPage extends StatefulWidget {
@@ -31,158 +31,287 @@ class ListingDetailPage extends StatefulWidget {
 
 class _ListingDetailPageState extends State<ListingDetailPage> {
   late Future<ListingDetail> _detailFuture;
+  bool _favoriteBusy = false;
 
   @override
   void initState() {
     super.initState();
-    _detailFuture = widget.repository.fetchListingDetail(widget.listingId);
+    _detailFuture = _load();
+  }
+
+  Future<ListingDetail> _load() {
+    return widget.repository.fetchListingDetail(
+      widget.listingId,
+      bearerToken: widget.session.isGuest ? null : widget.session.accessToken,
+    );
   }
 
   Future<void> _refresh() async {
-    final future = widget.repository.fetchListingDetail(widget.listingId);
+    final future = _load();
     setState(() {
       _detailFuture = future;
     });
     await future;
   }
 
+  Future<void> _toggleFavorite(ListingDetail detail) async {
+    if (widget.session.isGuest || _favoriteBusy) {
+      return;
+    }
+    setState(() => _favoriteBusy = true);
+    try {
+      await widget.repository.toggleFavorite(
+        listingId: detail.summary.id,
+        bearerToken: widget.session.accessToken,
+        isFavorited: detail.summary.isFavorited,
+      );
+      await _refresh();
+    } finally {
+      if (mounted) {
+        setState(() => _favoriteBusy = false);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      body: SafeArea(
-        child: FutureBuilder<ListingDetail>(
-          future: _detailFuture,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting &&
-                !snapshot.hasData) {
-              return const Center(child: CircularProgressIndicator());
-            }
+    return FutureBuilder<ListingDetail>(
+      future: _detailFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
+          return const Scaffold(
+            backgroundColor: AppColors.background,
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
 
-            if (snapshot.hasError || snapshot.data == null) {
-              return _DetailErrorState(
-                onBack: () => Navigator.pop(context),
-                onRetry: _refresh,
-              );
-            }
+        if (snapshot.hasError || snapshot.data == null) {
+          return Scaffold(
+            backgroundColor: AppColors.background,
+            body: SafeArea(
+              child: Center(
+                child: FilledButton(
+                  onPressed: _refresh,
+                  child: const Text('重试'),
+                ),
+              ),
+            ),
+          );
+        }
 
-            final detail = snapshot.data!;
-            final currentUserId = widget.session.user['id']?.toString() ?? '';
-            final isOwner =
-                detail.summary.sellerId.isNotEmpty &&
-                detail.summary.sellerId == currentUserId;
+        final detail = snapshot.data!;
+        final currentUserId = widget.session.user['id']?.toString() ?? '';
+        final isOwner =
+            detail.summary.sellerId.isNotEmpty &&
+            detail.summary.sellerId == currentUserId;
 
-            return RefreshIndicator(
+        return Scaffold(
+          backgroundColor: AppColors.background,
+          body: SafeArea(
+            child: RefreshIndicator(
               onRefresh: _refresh,
               child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 128),
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 136),
                 children: [
-                  EditorialScreenHeader(
-                    title: '商品详情',
-                    onBack: () => Navigator.pop(context),
-                    trailing: EditorialRoundIconButton(
-                      icon: Icons.share_rounded,
-                      onTap: () {},
-                    ),
+                  _DetailHeader(
+                    isFavorited: detail.summary.isFavorited,
+                    favoriteBusy: _favoriteBusy,
+                    canFavorite: !isOwner && !widget.session.isGuest,
+                    onBack: () => Navigator.of(context).pop(),
+                    onFavorite: () => _toggleFavorite(detail),
                   ),
                   const SizedBox(height: 16),
                   _DetailHero(detail: detail),
                   const SizedBox(height: 16),
                   _PriceSummary(detail: detail),
                   const SizedBox(height: 16),
+                  CommerceCard(
+                    title: '交易信息',
+                    child: Column(
+                      children: [
+                        CommerceKeyValueRow(
+                          label: '商品成色',
+                          value: detail.transactionInfo.conditionLabel,
+                        ),
+                        CommerceKeyValueRow(
+                          label: '运费',
+                          value: detail.transactionInfo.shippingFeeLabel,
+                        ),
+                        CommerceKeyValueRow(
+                          label: '发货承诺',
+                          value: detail.transactionInfo.shippingPromise,
+                        ),
+                        CommerceKeyValueRow(
+                          label: '议价',
+                          value:
+                              detail.transactionInfo.isNegotiable ? '支持议价' : '一口价',
+                        ),
+                        CommerceKeyValueRow(
+                          label: '收藏人数',
+                          value: '${detail.transactionInfo.favoriteCount}',
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  CommerceCard(
+                    title: '瑕疵与说明',
+                    child: Text(
+                      detail.transactionInfo.defectNotes,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        height: 1.55,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  if (detail.servicePromises.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 16),
+                      child: CommerceCard(
+                        title: '平台服务',
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: detail.servicePromises
+                              .map(
+                                (item) => CommercePill(
+                                  label: item,
+                                  backgroundColor: AppColors.surfaceSoft,
+                                  foregroundColor: AppColors.primary,
+                                ),
+                              )
+                              .toList(growable: false),
+                        ),
+                      ),
+                    ),
                   _SellerSummary(
                     detail: detail,
                     isOwner: isOwner,
                     onOpenChat: widget.onOpenChat,
                   ),
-                  if (isOwner) ...[
+                  if (detail.specs.isNotEmpty) ...[
                     const SizedBox(height: 16),
-                    _SectionCard(
-                      title: '商品状态',
-                      child: Text(
-                        '这是你发布的商品，当前页面不会显示联系、购买和评价等买家操作。',
-                        style: Theme.of(
-                          context,
-                        ).textTheme.bodyMedium?.copyWith(height: 1.5),
+                    CommerceCard(
+                      title: '商品参数',
+                      child: Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: detail.specs
+                            .map(
+                              (spec) => Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: AppColors.surfaceSoft,
+                                  borderRadius: BorderRadius.circular(18),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      spec.label,
+                                      style: Theme.of(context).textTheme.labelMedium,
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      spec.value,
+                                      style: Theme.of(context).textTheme.bodySmall,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            )
+                            .toList(growable: false),
                       ),
                     ),
                   ],
-                  if (detail.specs.isNotEmpty) ...[
-                    const SizedBox(height: 16),
-                    _SpecsSection(specs: detail.specs),
-                  ],
                   const SizedBox(height: 16),
-                  _SectionCard(
+                  CommerceCard(
                     title: '商品描述',
                     child: Text(
                       detail.description,
-                      style: Theme.of(
-                        context,
-                      ).textTheme.bodyMedium?.copyWith(height: 1.55),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  _SectionCard(
-                    title: '3D 预览',
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          detail.preview3d.isReady
-                              ? '3D 模型已准备完成，可以直接查看。'
-                              : detail.preview3d.statusMessage ??
-                                    '3D 模型仍在处理中，请稍后再试。',
-                          style: Theme.of(context).textTheme.bodyMedium,
-                        ),
-                        const SizedBox(height: 12),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            for (final badge
-                                in detail.preview3d.placeholderBadges)
-                              EditorialPill(
-                                label: badge,
-                                backgroundColor: AppColors.surfaceSoft,
-                                foregroundColor: AppColors.text,
-                              ),
-                            EditorialPill(
-                              label: detail.preview3d.previewStatus,
-                              backgroundColor: const Color(0xFFE0F7F7),
-                              foregroundColor: AppColors.mint,
-                            ),
-                          ],
-                        ),
-                      ],
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        height: 1.55,
+                      ),
                     ),
                   ),
                 ],
               ),
-            );
-          },
+            ),
+          ),
+          bottomNavigationBar: isOwner
+              ? null
+              : SafeArea(
+                  top: false,
+                  child: Container(
+                    padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
+                    decoration: const BoxDecoration(color: AppColors.surface),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: widget.onOpenChat,
+                            icon: const Icon(Icons.chat_bubble_outline_rounded),
+                            label: const Text('联系卖家'),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: FilledButton(
+                            onPressed: widget.onOpenOrder,
+                            child: Text(
+                              detail.transactionInfo.isNegotiable
+                                  ? '立即下单'
+                                  : '直接购买',
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+        );
+      },
+    );
+  }
+}
+
+class _DetailHeader extends StatelessWidget {
+  const _DetailHeader({
+    required this.isFavorited,
+    required this.favoriteBusy,
+    required this.canFavorite,
+    required this.onBack,
+    required this.onFavorite,
+  });
+
+  final bool isFavorited;
+  final bool favoriteBusy;
+  final bool canFavorite;
+  final VoidCallback onBack;
+  final VoidCallback onFavorite;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        IconButton.filledTonal(
+          onPressed: onBack,
+          icon: const Icon(Icons.arrow_back_rounded),
         ),
-      ),
-      bottomNavigationBar: FutureBuilder<ListingDetail>(
-        future: _detailFuture,
-        builder: (context, snapshot) {
-          final detail = snapshot.data;
-          if (detail == null) {
-            return const SizedBox.shrink();
-          }
-          final currentUserId = widget.session.user['id']?.toString() ?? '';
-          final isOwner =
-              detail.summary.sellerId.isNotEmpty &&
-              detail.summary.sellerId == currentUserId;
-          if (isOwner) {
-            return const SizedBox.shrink();
-          }
-          return _DetailActionBar(
-            onOpenChat: widget.onOpenChat,
-            onOpenOrder: widget.onOpenOrder,
-            onOpenReview: widget.onOpenReview,
-          );
-        },
-      ),
+        const Spacer(),
+        IconButton.filledTonal(
+          onPressed: () {},
+          icon: const Icon(Icons.share_rounded),
+        ),
+        const SizedBox(width: 8),
+        IconButton.filled(
+          onPressed: canFavorite && !favoriteBusy ? onFavorite : null,
+          icon: Icon(
+            isFavorited ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -197,17 +326,10 @@ class _DetailHero extends StatelessWidget {
     final viewerUrl = detail.preview3d.effectiveViewerUrl;
 
     return Container(
-      height: 270,
+      height: 292,
       decoration: BoxDecoration(
         color: AppColors.primary,
         borderRadius: BorderRadius.circular(30),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x22000000),
-            blurRadius: 24,
-            offset: Offset(0, 12),
-          ),
-        ],
       ),
       clipBehavior: Clip.antiAlias,
       child: viewerUrl != null
@@ -226,7 +348,7 @@ class _DetailHero extends StatelessWidget {
                 Positioned(
                   left: 14,
                   top: 14,
-                  child: EditorialPill(
+                  child: CommercePill(
                     label: detail.preview3d.isReady ? '3D 已就绪' : '3D 预览',
                     backgroundColor: Colors.black.withValues(alpha: 0.52),
                     foregroundColor: Colors.white,
@@ -251,25 +373,18 @@ class _DetailHero extends StatelessWidget {
                   Image.network(
                     detail.preview3d.coverImageUrl!,
                     fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                    errorBuilder: (_, _, _) => const SizedBox.shrink(),
                   ),
                 DecoratedBox(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
                       colors: [
                         Colors.black.withValues(alpha: 0.08),
-                        Colors.black.withValues(alpha: 0.54),
+                        Colors.black.withValues(alpha: 0.58),
                       ],
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
                     ),
-                  ),
-                ),
-                const Center(
-                  child: Icon(
-                    Icons.view_in_ar_rounded,
-                    color: Colors.white,
-                    size: 68,
                   ),
                 ),
                 Positioned(
@@ -281,14 +396,15 @@ class _DetailHero extends StatelessWidget {
                     children: [
                       Text(
                         detail.preview3d.placeholderTitle,
-                        style: Theme.of(context).textTheme.headlineSmall
-                            ?.copyWith(color: Colors.white),
+                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                          color: Colors.white,
+                        ),
                       ),
                       const SizedBox(height: 6),
                       Text(
                         detail.preview3d.placeholderSubtitle,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Colors.white.withValues(alpha: 0.82),
+                          color: Colors.white70,
                           height: 1.45,
                         ),
                       ),
@@ -308,19 +424,7 @@ class _PriceSummary extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(26),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x10000000),
-            blurRadius: 24,
-            offset: Offset(0, 10),
-          ),
-        ],
-      ),
+    return CommerceCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -335,7 +439,7 @@ class _PriceSummary extends StatelessWidget {
                   context,
                 ).textTheme.displaySmall?.copyWith(color: AppColors.coral),
               ),
-              if (detail.summary.originalPriceLabel != '面议')
+              if (detail.summary.originalPriceLabel != 'Negotiable')
                 Text(
                   detail.summary.originalPriceLabel,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
@@ -344,39 +448,44 @@ class _PriceSummary extends StatelessWidget {
                   ),
                 ),
               if (detail.summary.has3dBadge)
-                EditorialPill(
+                const CommercePill(
                   label: '3D 展示',
-                  backgroundColor: const Color(0xFFE4F5EE),
+                  backgroundColor: Color(0xFFE4F5EE),
                   foregroundColor: AppColors.mint,
+                ),
+              if (detail.transactionInfo.isNegotiable)
+                const CommercePill(
+                  label: '支持议价',
+                  backgroundColor: Color(0xFFFFF3D8),
+                  foregroundColor: AppColors.warning,
                 ),
             ],
           ),
           const SizedBox(height: 10),
-          Text(
-            detail.summary.title,
-            style: Theme.of(context).textTheme.headlineSmall,
-          ),
+          Text(detail.summary.title, style: Theme.of(context).textTheme.headlineSmall),
           if (detail.summary.subtitle.isNotEmpty) ...[
             const SizedBox(height: 8),
-            Text(
-              detail.summary.subtitle,
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
+            Text(detail.summary.subtitle, style: Theme.of(context).textTheme.bodyMedium),
           ],
-          const SizedBox(height: 8),
-          Row(
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
             children: [
-              const Icon(
-                Icons.location_on_rounded,
-                size: 16,
-                color: AppColors.textMuted,
+              CommercePill(
+                label: detail.transactionInfo.conditionLabel,
+                backgroundColor: AppColors.surfaceSoft,
+                foregroundColor: AppColors.primary,
               ),
-              const SizedBox(width: 4),
-              Expanded(
-                child: Text(
-                  detail.summary.location,
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
+              CommercePill(
+                label: detail.summary.shippingPromise,
+                backgroundColor: const Color(0xFFE8EEF7),
+                foregroundColor: AppColors.ocean,
+              ),
+              CommercePill(
+                label: detail.summary.location,
+                backgroundColor: const Color(0xFFFFF3D8),
+                foregroundColor: AppColors.warning,
               ),
             ],
           ),
@@ -399,327 +508,77 @@ class _SellerSummary extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceSoft,
-        borderRadius: BorderRadius.circular(24),
-      ),
-      child: Row(
+    final trust = detail.summary.sellerTrust;
+    return CommerceCard(
+      title: '卖家信息',
+      subtitle: detail.sellerLocation,
+      action: isOwner
+          ? const CommercePill(
+              label: '我的商品',
+              backgroundColor: Color(0xFFFFF3D8),
+              foregroundColor: AppColors.warning,
+            )
+          : TextButton(onPressed: onOpenChat, child: const Text('联系')),
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(20),
-            child: detail.summary.sellerAvatarUrl != null
-                ? Image.network(
-                    detail.summary.sellerAvatarUrl!,
-                    width: 64,
-                    height: 64,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) =>
-                        _SellerAvatarFallback(name: detail.summary.sellerName),
-                  )
-                : _SellerAvatarFallback(name: detail.summary.sellerName),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  crossAxisAlignment: WrapCrossAlignment.center,
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 28,
+                backgroundColor: AppColors.surfaceSoft,
+                backgroundImage: detail.summary.sellerAvatarUrl == null
+                    ? null
+                    : NetworkImage(detail.summary.sellerAvatarUrl!),
+                child: detail.summary.sellerAvatarUrl == null
+                    ? const Icon(Icons.person_rounded, color: AppColors.textMuted)
+                    : null,
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       detail.summary.sellerName,
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
-                    if (detail.sellerScore != null)
-                      EditorialPill(
-                        label: '信用 ${detail.sellerScore}',
-                        backgroundColor: const Color(0xFFE0F7F7),
-                        foregroundColor: AppColors.mint,
-                      ),
-                    if (isOwner)
-                      const EditorialPill(
-                        label: '我的商品',
-                        backgroundColor: Color(0xFFFFF2C4),
-                        foregroundColor: AppColors.primary,
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  detail.sellerBio,
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    const Icon(
-                      Icons.place_rounded,
-                      size: 16,
-                      color: AppColors.textMuted,
-                    ),
-                    const SizedBox(width: 4),
-                    Expanded(
-                      child: Text(
-                        detail.sellerLocation,
-                        style: Theme.of(context).textTheme.bodySmall,
+                    const SizedBox(height: 6),
+                    Text(
+                      detail.sellerBio,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppColors.textMuted,
+                        height: 1.45,
                       ),
                     ),
                   ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-          if (!isOwner) ...[
-            const SizedBox(width: 10),
-            TextButton(onPressed: onOpenChat, child: const Text('联系')),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _SellerAvatarFallback extends StatelessWidget {
-  const _SellerAvatarFallback({required this.name});
-
-  final String name;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 64,
-      height: 64,
-      decoration: BoxDecoration(
-        color: AppColors.surfaceRaised,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      alignment: Alignment.center,
-      child: Text(
-        name.isNotEmpty ? name.characters.first : '卖',
-        style: Theme.of(context).textTheme.headlineSmall,
-      ),
-    );
-  }
-}
-
-class _SpecsSection extends StatelessWidget {
-  const _SpecsSection({required this.specs});
-
-  final List<ListingSpec> specs;
-
-  @override
-  Widget build(BuildContext context) {
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: specs.length,
-      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-        maxCrossAxisExtent: 220,
-        mainAxisSpacing: 12,
-        crossAxisSpacing: 12,
-        childAspectRatio: 2.2,
-      ),
-      itemBuilder: (context, index) {
-        final spec = specs[index];
-        return Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.center,
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
             children: [
-              Text(spec.label, style: Theme.of(context).textTheme.labelSmall),
-              const SizedBox(height: 6),
-              Text(
-                spec.value,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.titleMedium,
+              CommercePill(
+                label: '芝麻分 ${trust.sesameScore}',
+                backgroundColor: const Color(0xFFE8F7F0),
+                foregroundColor: AppColors.success,
+              ),
+              CommercePill(
+                label: '成交 ${trust.soldCount}',
+                backgroundColor: AppColors.surfaceSoft,
+                foregroundColor: AppColors.primary,
+              ),
+              CommercePill(
+                label: '关注 ${trust.followersCount}',
+                backgroundColor: const Color(0xFFE8EEF7),
+                foregroundColor: AppColors.ocean,
               ),
             ],
           ),
-        );
-      },
-    );
-  }
-}
-
-class _SectionCard extends StatelessWidget {
-  const _SectionCard({required this.title, required this.child});
-
-  final String title;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x10000000),
-            blurRadius: 24,
-            offset: Offset(0, 10),
-          ),
         ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(title, style: Theme.of(context).textTheme.headlineSmall),
-          const SizedBox(height: 12),
-          child,
-        ],
-      ),
-    );
-  }
-}
-
-class _DetailActionBar extends StatelessWidget {
-  const _DetailActionBar({
-    required this.onOpenChat,
-    required this.onOpenOrder,
-    required this.onOpenReview,
-  });
-
-  final VoidCallback onOpenChat;
-  final VoidCallback onOpenOrder;
-  final VoidCallback onOpenReview;
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-        child: Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.92),
-            borderRadius: BorderRadius.circular(28),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x10000000),
-                blurRadius: 24,
-                offset: Offset(0, -2),
-              ),
-            ],
-          ),
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final compact = constraints.maxWidth < 360;
-              if (compact) {
-                return Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    FilledButton(
-                      onPressed: onOpenOrder,
-                      child: const Text('立即购买'),
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: onOpenChat,
-                            child: const Text('联系卖家'),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: onOpenReview,
-                            child: const Text('查看评价'),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                );
-              }
-
-              return Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: onOpenChat,
-                      child: const Text('联系卖家'),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: onOpenReview,
-                      child: const Text('查看评价'),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: FilledButton(
-                      onPressed: onOpenOrder,
-                      child: const Text('立即购买'),
-                    ),
-                  ),
-                ],
-              );
-            },
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _DetailErrorState extends StatelessWidget {
-  const _DetailErrorState({required this.onBack, required this.onRetry});
-
-  final VoidCallback onBack;
-  final Future<void> Function() onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(
-              Icons.error_outline_rounded,
-              size: 52,
-              color: AppColors.coral,
-            ),
-            const SizedBox(height: 12),
-            Text('商品详情加载失败', style: Theme.of(context).textTheme.headlineSmall),
-            const SizedBox(height: 8),
-            Text('请检查网络后重试。', style: Theme.of(context).textTheme.bodyMedium),
-            const SizedBox(height: 16),
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              alignment: WrapAlignment.center,
-              children: [
-                OutlinedButton(onPressed: onBack, child: const Text('返回')),
-                FilledButton(
-                  onPressed: () {
-                    onRetry();
-                  },
-                  child: const Text('重试'),
-                ),
-              ],
-            ),
-          ],
-        ),
       ),
     );
   }

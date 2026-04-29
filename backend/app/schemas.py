@@ -86,17 +86,20 @@ class UserProfileUpdate(BaseModel):
 class UserAddressSummary(BaseModel):
     id: str
     user_id: str
+    label: str | None = None
     recipient_name: str
     phone: str
     region_code: str
     address_line1: str
     address_line2: str | None = None
+    full_address: str | None = None
     is_default: bool = False
     created_at: str | None = None
     updated_at: str | None = None
 
 
 class UserAddressCreateRequest(BaseModel):
+    label: str | None = None
     recipient_name: str
     phone: str
     region_code: str
@@ -106,6 +109,7 @@ class UserAddressCreateRequest(BaseModel):
 
 
 class UserAddressUpdateRequest(BaseModel):
+    label: str | None = None
     recipient_name: str | None = None
     phone: str | None = None
     region_code: str | None = None
@@ -163,7 +167,13 @@ class ListingSummary(BaseModel):
     status: str
     cover_media: MediaAsset | None = None
     location: str | None = None
+    condition_level: str | None = None
+    shipping_fee: Money | None = None
+    shipping_promise: str | None = None
+    is_negotiable: bool = False
+    is_favorited: bool = False
     badges: list[str] = Field(default_factory=list)
+    seller_trust: dict[str, Any] = Field(default_factory=dict)
     seller: UserSummary | None = None
 
 
@@ -211,6 +221,8 @@ class ListingDetail(BaseModel):
     inquiries: list[dict[str, Any]] = Field(default_factory=list)
     reviews: list[dict[str, Any]] = Field(default_factory=list)
     actions: list[dict[str, Any]] = Field(default_factory=list)
+    service_promises: list[str] = Field(default_factory=list)
+    transaction_info: dict[str, Any] = Field(default_factory=dict)
 
 
 class ConversationSummary(BaseModel):
@@ -218,6 +230,8 @@ class ConversationSummary(BaseModel):
     listing_id: str | None = None
     other_user: UserSummary | None = None
     last_message_preview: str | None = None
+    listing_title: str | None = None
+    last_message_type: str | None = None
     unread_count: int = 0
     updated_at: str | None = None
 
@@ -229,6 +243,7 @@ class ConversationMessage(BaseModel):
     message_type: str = 'text'
     content_text: str = ''
     asset: MediaAsset | None = None
+    offer: dict[str, Any] | None = None
     created_at: str
     read_at: str | None = None
 
@@ -239,16 +254,26 @@ class ConversationDetail(BaseModel):
     safety_banner: dict[str, Any] | None = None
     messages: list[ConversationMessage] = Field(default_factory=list)
     composer: dict[str, Any] | None = None
+    active_offer: dict[str, Any] | None = None
+    accepted_offer: dict[str, Any] | None = None
+    related_order: dict[str, Any] | None = None
 
 
 class OrderSummary(BaseModel):
     id: str
+    order_no: str | None = None
     status: str
+    status_label: str | None = None
+    payment_status: str | None = None
+    shipping_status: str | None = None
+    aftersale_status: str | None = None
+    role: str | None = None
     buyer: UserSummary | None = None
     seller: UserSummary | None = None
     item_snapshot: dict[str, Any] = Field(default_factory=dict)
     totals: dict[str, Any] = Field(default_factory=dict)
     logistics: dict[str, Any] = Field(default_factory=dict)
+    address: dict[str, Any] = Field(default_factory=dict)
     can_confirm_receipt: bool = False
 
 
@@ -265,6 +290,8 @@ class OrderDetail(BaseModel):
     order: OrderSummary
     timeline: list[OrderTimelineEvent] = Field(default_factory=list)
     receipt: dict[str, Any] = Field(default_factory=dict)
+    status_card: dict[str, Any] = Field(default_factory=dict)
+    aftersale: dict[str, Any] = Field(default_factory=dict)
     action_bar: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -377,11 +404,16 @@ class NotificationSummary(BaseModel):
     id: str
     user_id: str
     notification_type: str
+    category: str | None = None
+    icon_key: str | None = None
     title: str
     body: str
     entity_type: str | None = None
     entity_id: str | None = None
+    cta_action: str | None = None
+    cta_target: str | None = None
     read_at: str | None = None
+    read_state: str = 'unread'
     created_at: str
 
 
@@ -462,6 +494,9 @@ class ConversationCreateRequest(BaseModel):
 class OrderCreateRequest(BaseModel):
     listing_id: str
     address_id: str
+    offer_id: str | None = None
+    conversation_id: str | None = None
+    buyer_note: str | None = None
 
 
 class OrderShipRequest(BaseModel):
@@ -472,6 +507,16 @@ class OrderShipRequest(BaseModel):
 
 class OrderDisputeRequest(BaseModel):
     reason: str = ''
+
+
+class OrderRefundRequest(BaseModel):
+    reason: str = ''
+
+
+class ConversationOfferCreateRequest(BaseModel):
+    amount_minor: int = Field(gt=0)
+    currency: str = 'CNY'
+    note: str = ''
 
 
 class UploadPresignRequest(BaseModel):
@@ -529,8 +574,9 @@ class ListingUpdateRequest(BaseModel):
 
 class SendMessageRequest(BaseModel):
     content_text: str = ''
-    message_type: str = Field(default='text', pattern='^(text|image|video|system)$')
+    message_type: str = Field(default='text', pattern='^(text|image|video|system|offer)$')
     asset_id: str | None = None
+    offer_id: str | None = None
 
 
 class ConversationReadRequest(BaseModel):

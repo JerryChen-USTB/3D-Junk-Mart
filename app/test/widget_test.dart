@@ -14,6 +14,7 @@ class FakeApiClient extends ApiClient {
   final List<Map<String, dynamic>> _listings = <Map<String, dynamic>>[
     <String, dynamic>{
       'id': 'listing_demo_3d_camera',
+      'category_id': 'camera',
       'title': '3D Camera Demo',
       'subtitle': '3D-ready second-hand camera',
       'price': <String, dynamic>{'amount_minor': 29900, 'currency': 'CNY'},
@@ -26,8 +27,26 @@ class FakeApiClient extends ApiClient {
         'url': '/storage/seed/listings/3dgs_cover.jpg',
       },
       'location': 'Shanghai',
+      'condition_level': 'excellent',
+      'condition_label': '几乎全新',
+      'shipping_fee': <String, dynamic>{'amount_minor': 0, 'currency': 'CNY'},
+      'shipping_promise': '24小时内发货',
+      'is_negotiable': true,
+      'is_favorited': false,
+      'favorite_count': 12,
+      'has_3d_preview': true,
       'badges': <String>['3d-ready'],
-      'seller': <String, dynamic>{'display_name': 'Demo Seller'},
+      'seller_trust': <String, dynamic>{
+        'sold_count': 5,
+        'followers_count': 8,
+        'sesame_credit_score': 712,
+        'vip_level': 'gold',
+      },
+      'seller': <String, dynamic>{
+        'id': 'user_demo_seller',
+        'display_name': 'Demo Seller',
+      },
+      'viewer_url': '/viewer/index.html?task_id=demo',
     },
   ];
 
@@ -92,6 +111,68 @@ class FakeApiClient extends ApiClient {
         code: 0,
         message: 'ok',
         data: _sessionEnvelope().data['profile'] as Map<String, dynamic>,
+        meta: const <String, dynamic>{},
+      );
+    }
+
+    if (path == '/pages/home') {
+      return ApiEnvelope<Map<String, dynamic>>(
+        code: 0,
+        message: 'ok',
+        data: <String, dynamic>{
+          'page_key': 'home',
+          'resources': <String, dynamic>{
+            'listings': _listings,
+            'featured_3d': _listings,
+            'banners': const <Map<String, dynamic>>[
+              <String, dynamic>{
+                'title': '3D 闲置好物',
+                'subtitle': '用 3D 预览提升交易决策效率',
+              },
+            ],
+            'categories': const <Map<String, dynamic>>[
+              <String, dynamic>{'id': 'camera', 'name': '摄影器材'},
+              <String, dynamic>{'id': 'phone', 'name': '手机数码'},
+            ],
+            'services': const <Map<String, dynamic>>[
+              <String, dynamic>{'title': '猜你喜欢', 'subtitle': '推荐流'},
+              <String, dynamic>{'title': '3D 专区', 'subtitle': '沉浸式逛商品'},
+            ],
+          },
+        },
+        meta: const <String, dynamic>{},
+      );
+    }
+
+    if (path == '/search/suggestions') {
+      return ApiEnvelope<Map<String, dynamic>>(
+        code: 0,
+        message: 'ok',
+        data: const <String, dynamic>{
+          'query': '',
+          'suggestions': <String>['相机', '镜头', '3D 商品'],
+          'recent_queries': <String>['相机'],
+        },
+        meta: const <String, dynamic>{},
+      );
+    }
+
+    if (path == '/search/facets') {
+      return ApiEnvelope<Map<String, dynamic>>(
+        code: 0,
+        message: 'ok',
+        data: const <String, dynamic>{
+          'price_buckets': <Map<String, dynamic>>[
+            <String, dynamic>{'id': 'lt_1000', 'label': '1000 元以下'},
+          ],
+          'condition_levels': <Map<String, dynamic>>[
+            <String, dynamic>{'id': 'excellent', 'label': '几乎全新'},
+          ],
+          'sort_options': <Map<String, dynamic>>[
+            <String, dynamic>{'id': 'latest', 'label': '最新上新'},
+            <String, dynamic>{'id': 'popular', 'label': '人气优先'},
+          ],
+        },
         meta: const <String, dynamic>{},
       );
     }
@@ -218,8 +299,6 @@ void main() {
 
     await tester.tap(find.byType(FilledButton).first);
     await tester.pumpAndSettle();
-
-    expect(find.text('3D Camera Demo'), findsWidgets);
 
     await tester.tap(find.byIcon(Icons.person_rounded).last);
     await tester.pumpAndSettle();

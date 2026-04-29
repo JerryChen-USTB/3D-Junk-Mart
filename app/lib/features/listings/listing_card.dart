@@ -53,17 +53,19 @@ class ListingCard extends StatelessWidget {
     required this.listing,
     required this.onTap,
     this.tall = false,
+    this.compact = false,
     this.previewController,
   });
 
   final ListingSummary listing;
   final VoidCallback onTap;
   final bool tall;
+  final bool compact;
   final ListingPreviewController? previewController;
 
   @override
   Widget build(BuildContext context) {
-    final topHeight = tall ? 198.0 : 168.0;
+    final topHeight = compact ? 140.0 : (tall ? 184.0 : 152.0);
     final hasViewer = listing.viewerUrl != null && listing.viewerUrl!.isNotEmpty;
     final badge = listing.badges.isNotEmpty
         ? listing.badges.first
@@ -182,13 +184,13 @@ class ListingCard extends StatelessWidget {
                   bottom: Radius.circular(26),
                 ),
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
+                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         listing.title,
-                        maxLines: 2,
+                        maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(
                           context,
@@ -198,12 +200,31 @@ class ListingCard extends StatelessWidget {
                         const SizedBox(height: 6),
                         Text(
                           listing.subtitle,
-                          maxLines: 2,
+                          maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodySmall,
+                            style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ],
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          if (listing.hasKnownCondition)
+                            EditorialPill(
+                              label: listing.conditionLabel,
+                              backgroundColor: AppColors.surfaceSoft,
+                              foregroundColor: AppColors.primary,
+                            ),
+                          if (listing.isNegotiable)
+                            const EditorialPill(
+                              label: '可议价',
+                              backgroundColor: Color(0xFFFFF3D8),
+                              foregroundColor: AppColors.warning,
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
                       Row(
                         children: [
                           Expanded(
@@ -227,7 +248,7 @@ class ListingCard extends StatelessWidget {
                             ),
                         ],
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 6),
                       Row(
                         children: [
                           const Icon(
@@ -252,6 +273,17 @@ class ListingCard extends StatelessWidget {
                               overflow: TextOverflow.ellipsis,
                               style: Theme.of(context).textTheme.labelSmall,
                             ),
+                          ),
+                          const SizedBox(width: 8),
+                          const Icon(
+                            Icons.favorite_border_rounded,
+                            size: 14,
+                            color: AppColors.textMuted,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            '${listing.favoriteCount}',
+                            style: Theme.of(context).textTheme.labelSmall,
                           ),
                         ],
                       ),

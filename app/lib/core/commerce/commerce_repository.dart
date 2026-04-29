@@ -67,14 +67,62 @@ class CommerceRepository {
     String conversationId,
     String bearerToken, {
     required String contentText,
+    String messageType = 'text',
+    String? offerId,
   }) async {
     final response = await _apiClient.postJson(
       '/conversations/$conversationId/messages',
       bearerToken: bearerToken,
       body: <String, dynamic>{
         'content_text': contentText,
-        'message_type': 'text',
+        'message_type': messageType,
+        if (offerId != null && offerId.isNotEmpty) 'offer_id': offerId,
       },
+    );
+    return response.data;
+  }
+
+  Future<Map<String, dynamic>> createConversationOffer(
+    String conversationId,
+    String bearerToken, {
+    required int amountMinor,
+    String currency = 'CNY',
+    String? note,
+  }) async {
+    final response = await _apiClient.postJson(
+      '/conversations/$conversationId/offers',
+      bearerToken: bearerToken,
+      body: <String, dynamic>{
+        'amount_minor': amountMinor,
+        'currency': currency,
+        if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
+      },
+    );
+    return response.data;
+  }
+
+  Future<Map<String, dynamic>> acceptConversationOffer(
+    String conversationId,
+    String offerId,
+    String bearerToken,
+  ) async {
+    final response = await _apiClient.postJson(
+      '/conversations/$conversationId/offers/$offerId/accept',
+      bearerToken: bearerToken,
+      body: const <String, dynamic>{},
+    );
+    return response.data;
+  }
+
+  Future<Map<String, dynamic>> rejectConversationOffer(
+    String conversationId,
+    String offerId,
+    String bearerToken,
+  ) async {
+    final response = await _apiClient.postJson(
+      '/conversations/$conversationId/offers/$offerId/reject',
+      bearerToken: bearerToken,
+      body: const <String, dynamic>{},
     );
     return response.data;
   }
@@ -113,11 +161,34 @@ class CommerceRepository {
     String bearerToken, {
     required String listingId,
     required String addressId,
+    String? offerId,
+    String? conversationId,
+    String? buyerNote,
   }) async {
     final response = await _apiClient.postJson(
       '/orders',
       bearerToken: bearerToken,
-      body: <String, dynamic>{'listing_id': listingId, 'address_id': addressId},
+      body: <String, dynamic>{
+        'listing_id': listingId,
+        'address_id': addressId,
+        if (offerId != null && offerId.isNotEmpty) 'offer_id': offerId,
+        if (conversationId != null && conversationId.isNotEmpty)
+          'conversation_id': conversationId,
+        if (buyerNote != null && buyerNote.trim().isNotEmpty)
+          'buyer_note': buyerNote.trim(),
+      },
+    );
+    return response.data;
+  }
+
+  Future<Map<String, dynamic>> mockPayOrder(
+    String orderId,
+    String bearerToken,
+  ) async {
+    final response = await _apiClient.postJson(
+      '/orders/$orderId/mock-pay',
+      bearerToken: bearerToken,
+      body: const <String, dynamic>{},
     );
     return response.data;
   }
@@ -163,6 +234,64 @@ class CommerceRepository {
     return response.data;
   }
 
+  Future<Map<String, dynamic>> requestRefund(
+    String orderId,
+    String bearerToken, {
+    required String reason,
+  }) async {
+    final response = await _apiClient.postJson(
+      '/orders/$orderId/refund-request',
+      bearerToken: bearerToken,
+      body: <String, dynamic>{'reason': reason},
+    );
+    return response.data;
+  }
+
+  Future<Map<String, dynamic>> approveRefund(
+    String orderId,
+    String bearerToken, {
+    String? resolutionNote,
+  }) async {
+    final response = await _apiClient.postJson(
+      '/orders/$orderId/approve-refund',
+      bearerToken: bearerToken,
+      body: <String, dynamic>{
+        if (resolutionNote != null && resolutionNote.trim().isNotEmpty)
+          'resolution_note': resolutionNote.trim(),
+      },
+    );
+    return response.data;
+  }
+
+  Future<Map<String, dynamic>> rejectRefund(
+    String orderId,
+    String bearerToken, {
+    String? resolutionNote,
+  }) async {
+    final response = await _apiClient.postJson(
+      '/orders/$orderId/reject-refund',
+      bearerToken: bearerToken,
+      body: <String, dynamic>{
+        if (resolutionNote != null && resolutionNote.trim().isNotEmpty)
+          'resolution_note': resolutionNote.trim(),
+      },
+    );
+    return response.data;
+  }
+
+  Future<Map<String, dynamic>> disputeOrder(
+    String orderId,
+    String bearerToken, {
+    required String reason,
+  }) async {
+    final response = await _apiClient.postJson(
+      '/orders/$orderId/dispute',
+      bearerToken: bearerToken,
+      body: <String, dynamic>{'reason': reason},
+    );
+    return response.data;
+  }
+
   Future<List<Map<String, dynamic>>> fetchAddresses(String bearerToken) async {
     final response = await _apiClient.getObject(
       '/users/me/addresses',
@@ -173,6 +302,7 @@ class CommerceRepository {
 
   Future<Map<String, dynamic>> createAddress(
     String bearerToken, {
+    String? label,
     required String recipientName,
     required String phone,
     required String regionCode,
@@ -184,6 +314,7 @@ class CommerceRepository {
       '/users/me/addresses',
       bearerToken: bearerToken,
       body: <String, dynamic>{
+        if (label != null && label.trim().isNotEmpty) 'label': label.trim(),
         'recipient_name': recipientName,
         'phone': phone,
         'region_code': regionCode,
@@ -193,6 +324,40 @@ class CommerceRepository {
       },
     );
     return response.data;
+  }
+
+  Future<Map<String, dynamic>> updateAddress(
+    String addressId,
+    String bearerToken, {
+    String? label,
+    String? recipientName,
+    String? phone,
+    String? regionCode,
+    String? addressLine1,
+    String? addressLine2,
+    bool? isDefault,
+  }) async {
+    final response = await _apiClient.patchJson(
+      '/users/me/addresses/$addressId',
+      bearerToken: bearerToken,
+      body: <String, dynamic>{
+        if (label case final value?) 'label': value,
+        if (recipientName case final value?) 'recipient_name': value,
+        if (phone case final value?) 'phone': value,
+        if (regionCode case final value?) 'region_code': value,
+        if (addressLine1 case final value?) 'address_line1': value,
+        if (addressLine2 case final value?) 'address_line2': value,
+        if (isDefault case final value?) 'is_default': value,
+      },
+    );
+    return response.data;
+  }
+
+  Future<void> deleteAddress(String addressId, String bearerToken) async {
+    await _apiClient.deleteJson(
+      '/users/me/addresses/$addressId',
+      bearerToken: bearerToken,
+    );
   }
 
   Future<List<Map<String, dynamic>>> fetchListingReviews(
@@ -301,6 +466,17 @@ class CommerceRepository {
   Future<void> readAllNotifications(String bearerToken) async {
     await _apiClient.postJson(
       '/notifications/read-all',
+      bearerToken: bearerToken,
+      body: const <String, dynamic>{},
+    );
+  }
+
+  Future<void> readNotification(
+    String notificationId,
+    String bearerToken,
+  ) async {
+    await _apiClient.patchJson(
+      '/notifications/$notificationId/read',
       bearerToken: bearerToken,
       body: const <String, dynamic>{},
     );

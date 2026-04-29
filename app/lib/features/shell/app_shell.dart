@@ -101,6 +101,20 @@ class _AppShellState extends State<AppShell> {
           repository: _commerceRepository,
           session: widget.session,
           conversationId: conversationId,
+          listingsRepository: _listingsRepository,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openConversationById(String conversationId) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ConversationDetailPage(
+          repository: _commerceRepository,
+          session: widget.session,
+          conversationId: conversationId,
+          listingsRepository: _listingsRepository,
         ),
       ),
     );
@@ -146,12 +160,36 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
+  void _openOrderDetail(String orderId) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => OrderDetailPage(
+          session: widget.session,
+          repository: _commerceRepository,
+          orderId: orderId,
+        ),
+      ),
+    );
+  }
+
   void _openWallet() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => WalletPage(
           session: widget.session,
           repository: _commerceRepository,
+        ),
+      ),
+    );
+  }
+
+  void _openFavorites() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => FavoriteListingsPage(
+          session: widget.session,
+          repository: _listingsRepository,
+          onOpenListing: _openListingDetail,
         ),
       ),
     );
@@ -174,6 +212,11 @@ class _AppShellState extends State<AppShell> {
         builder: (_) => NotificationsPage(
           session: widget.session,
           repository: _commerceRepository,
+          onOpenOrder: _openOrderDetail,
+          onOpenConversation: (conversationId) {
+            _openConversationById(conversationId);
+          },
+          onOpenListing: _openListingDetail,
         ),
       ),
     );
@@ -215,12 +258,14 @@ class _AppShellState extends State<AppShell> {
       HomePage(
         key: ValueKey('home-$_marketplaceVersion'),
         repository: _listingsRepository,
+        session: widget.session,
         onGoSearch: () => _selectTab(1),
         onOpenListing: _openListingDetail,
       ),
       SearchPage(
         key: ValueKey('search-$_marketplaceVersion'),
         repository: _listingsRepository,
+        session: widget.session,
         onGoHome: () => _selectTab(0),
         onOpenListing: _openListingDetail,
       ),
@@ -231,7 +276,11 @@ class _AppShellState extends State<AppShell> {
         onOpenListing: _openListingDetail,
         onMarketplaceChanged: _markMarketplaceDirty,
       ),
-      MessagesPage(repository: _commerceRepository, session: widget.session),
+      MessagesPage(
+        repository: _commerceRepository,
+        session: widget.session,
+        listingsRepository: _listingsRepository,
+      ),
       ProfilePage(
         session: widget.session,
         apiClient: widget.apiClient,
@@ -251,6 +300,7 @@ class _AppShellState extends State<AppShell> {
         onSignOut: widget.onSignOut,
         repository: _listingsRepository,
         onOpenListing: _openListingDetail,
+        onOpenFavorites: _openFavorites,
         onOpenOrders: _openOrders,
         onOpenWallet: _openWallet,
         onOpenMembership: _openMembership,
