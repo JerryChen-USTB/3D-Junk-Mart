@@ -1,0 +1,57 @@
+这次可以按“一次性收口”来做，不需要拆很多轮。基于我刚刚对现有代码的核对，问题主要集中在 4 个层面：数据映射丢字段、页面结构有冲突、资料页状态没有统一、以及一批英文/乱码文案和尺寸没收口。
+
+修复计划
+
+先修商品数据与详情页判断链路。
+文件会落在 listing_models.dart, listing_detail_page.dart, marketplace.py, reconstructions.py。
+目标是一次解决这 4 个问题：
+商品属主不再看到 立即购买 / 联系 / 评价
+商品详情页展示商家头像
+商品卡片不再出现 Unknown location
+reconstruction 发布出来的 listing 不再把 location_city 写成空值，缺省时回退到卖家 profile location
+做法是给前端 listing/detail 模型补 sellerId、sellerAvatarUrl、更稳的 location 映射，同时让后端摘要返回值保持一致。
+然后修会话详情页和搜索页交互。
+文件会落在 chat_pages.dart, search_page.dart, app_shell.dart。
+目标是解决：
+Contact 进入会话详情后顶部卡片错位、页面像没加载完、输入区不可用
+搜索页点击 Search 后必须切页再回来才刷新
+这里我会把会话详情页改成单一头部结构，不再让顶部信息区和页面标题互相打架；输入框固定到底部。搜索页则改成显式搜索状态，点击按钮时先收起键盘、立即刷新列表和摘要，不依赖离开页面后重建。
+再修 Profile / Profile settings 的资料同步和退出登录交互。
+文件会落在 profile_page.dart, profile_settings_page.dart, app_shell.dart。
+目标是解决：
+更新头像后，Profile 和 Profile settings 显示不一致
+退出登录前先弹确认框
+顶部卡片按你要求改成上下两层布局
+根因很明确：settings 页现在主要读 widget.session，不是最新 profile。这里我会统一成“最新 profile 为单一来源”，保存后立即回填并刷新两个页面。
+最后做一轮文案和版式收口。
+文件主要是 auth_pages.dart, listing_detail_page.dart, chat_pages.dart, profile_page.dart, profile_settings_page.dart, search_page.dart。
+这一步一次解决：
+登录注册输入框文字垂直对齐问题
+移除登录页顶部无用提示卡片
+把相关页面所有英文和乱码文案改成正常中文
+缩小 Profile settings 每个选项卡高度
+我不会上完整 i18n 框架，这轮直接把当前暴露页面的硬编码文案全部收口成正常 UTF-8 中文。
+验收方式
+
+自动化：补一组 Flutter widget test，覆盖搜索刷新、详情页属主按钮隐藏、资料页保存后头像同步、退出登录确认。
+手工：按你这次报的 6 个 bug 和 6 个调整项逐条过一遍。
+说明：这轮不依赖远程训练服务可达，当前你在手机热点下也能完成这批问题的验证；trainer 相关链路不放进这次修复批次。
+如果你确认这份计划，我下一条就按这个顺序直接开始改。
+
+----
+
+这轮已经落完，不是只做计划。
+
+已修复
+
+商品详情页现在会识别属主，属主不再看到“立即购买 / 联系卖家 / 查看评价”，同时补上卖家头像展示。核心改动在 listing_detail_page.dart、listing_models.dart。
+商品卡片和详情的地区字段做了兜底，发布 3D 商品时也会把卖家所在地写回 listing，不再轻易落成 Unknown location。后端修正在 marketplace.py 和 reconstructions.py。
+会话详情页已重做成单一头部 + 商品卡片 + 消息区 + 底部输入框，不再出现顶部悬浮卡片和无法聊天的问题。改动在 chat_pages.dart。
+搜索页改成显式状态刷新，点击“搜索”会立刻更新结果，不再依赖切页重建。改动在 search_page.dart。
+Profile / Profile settings 现在统一优先读取最新 /users/me 数据，头像更新后两页会保持一致；Profile 顶部卡片也按你要求改成上下两层；退出登录前会弹确认框。改动在 profile_page.dart、profile_settings_page.dart。
+登录注册页移除了顶部无用卡片，输入框重做了图标与文字的垂直对齐，整套主路径文案改成中文。改动在 auth_pages.dart、app_shell.dart，同时我把首页、发布页、订单/钱包/会员/通知/地址/评价页也顺手收口成中文。
+验证
+
+flutter test 通过
+python -m unittest discover 通过
+这批修复不依赖远程训练服务，你现在在手机热点下也可以直接真机验证这 12 项 UI / 交互问题。建议你下一步按你最初那份 bug 清单逐条点一遍，如果还有残留，我继续按同一轮风格收口。

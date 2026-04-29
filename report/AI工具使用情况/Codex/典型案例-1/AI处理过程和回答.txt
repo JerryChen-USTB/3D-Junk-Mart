@@ -1,0 +1,28 @@
+制定计划：
+我先把订单、聊天、通知、地址这几块的当前实现和接口细节再钉实，尤其先定位聊天页为什么会只剩安全提醒卡片，这样后面的计划才能把“改什么”和“为什么改”写死。
+Ran 4 commands
+我已经确认两件事：一是后端订单状态机现在只有最小可用版，二是聊天页代码按理说应该有消息列表和输入区，所以你截图里那种“只剩安全提醒、完全没法操作”的状态，大概率是前端布局/层级出了实际显示 bug，不是产品逻辑本来就这么设计。接下来我会把“第一期”需要锁定的产品取舍问清楚。
+我已经把产品取舍锁住了：按“闲鱼的交易关系 + 淘宝的交易中心”去做，订单范围做到履约加基础售后，聊天里直接纳入基础议价。接下来我补最后一层实现细节，主要是订单状态机、消息结构和前端数据承载方式。
+Ran 8 commands
+我再看一眼搜索/收藏这层已有接口的落点，避免计划把“逛”和“看”说得太虚。然后我就给你一份能直接照着做的完整实施计划。
+Ran 4 commands
+还有一个关键决策要锁：既然不要真实支付，订单流里要不要引入“模拟支付确认”这一层。这个会直接决定状态机、下单页和订单中心结构。
+
+实施计划后：
+Implemented
+
+第一期主链路已经按“逛、看、问、下单”做了实装，不是只写计划。
+
+后端这次把交易状态机、议价和搜索契约补齐了：marketplace.py (line 1)、schemas.py (line 1)、marketplace_store.py (line 1)。现在订单走 pending_payment -> awaiting_shipment -> shipped -> completed，并支持 mock-pay、退款申请、同意/拒绝退款、纠纷；聊天支持 offer 消息和接受/拒绝议价；首页/搜索/商品列表支持排序、价格区间、成色、仅 3D、仅可议价等筛选。
+
+Flutter 主链路也重做了。聊天页已经修掉你截图里的 bug，改成固定头部 + 商品卡 + 独立消息区 + 键盘安全的底部输入区，并补了议价卡片、空会话快捷话术、从聊天直达下单/查看订单：chat_pages.dart (line 1)。订单中心、结算、通知、地址管理都改成高信息密度卡片，且结算已改成“先创建待支付订单，再进入模拟支付页”：order_pages.dart (line 1)、checkout_page.dart (line 1)、account_pages.dart (line 1)。同时把首页、搜索页、商品详情页升级成更接近成熟二手市场的形态，并抽了一层共享电商卡片组件：home_page.dart (line 1)、search_page.dart (line 1)、listing_detail_page.dart (line 1)、commerce_widgets.dart (line 1)。
+
+Verification
+
+python -m unittest tests.test_backend_matrix -q 通过，当前是 9 个测试全绿；我额外补了“议价接受后按成交价下单”和“mock 支付后申请退款/卖家同意退款”的回归。test_backend_matrix.py (line 1)
+
+flutter test 通过；dart analyze lib 无 error，仅剩一些原仓库已有的 info 级提示，主要在 profile/ 和 reconstructions/ 这些未改模块。
+
+Notes
+
+还有一个没顺手处理的是后端测试时 SQLite 连接的 ResourceWarning，这是测试/存储层卫生问题，不影响这次业务功能落地。如果你继续推进第二轮，我建议直接做“议价消息系统化 + 订单售后页再细化 + 收藏/最近浏览/我的收藏入口补齐”。
