@@ -16,6 +16,7 @@ build/
 
 # Runtime storage and logs
 *.log
+recovered_models/
 storage/db/*
 storage/tasks/*
 storage/uploads/*
